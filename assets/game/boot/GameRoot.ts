@@ -63,6 +63,15 @@ export class GameRoot extends AppEntry {
         app.log.info('Bootstrap ready');
     }
     /**
+     * 清理完成前先交付可见反馈，重试仍由 AppEntry 的启动屏障约束。
+     */
+    protected onBootCleaning(error: unknown): void {
+        if (this.bootStatus) {
+            this.bootStatus.node.active = true;
+            this.bootStatus.string = `启动失败，正在清理…\n${error instanceof Error ? error.message : String(error)}`;
+        }
+    }
+    /**
      * 把启动错误写入日志并显示到启动标签。
      * @param error - 原始启动错误。
      */

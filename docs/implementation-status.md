@@ -35,6 +35,15 @@ npm run test:showcase
 
 集成脚本使用项目根目录的本机 MCP 配置，并校验连接的 Creator 项目路径。先确认当前编辑器就是待测项目；复制项目后重新生成连接配置。只运行本次改动涉及的脚本。
 
+运行时检查可按功能选择，多个功能组串行执行，首个失败停止并返回非零退出码：
+
+```powershell
+npm run test:integration -- --list
+npm run test:integration -- ui startup --url http://localhost:7456/
+```
+
+`--list` 列出各组需要保留的示例；`ui` 包含排序、生命周期和清理回归，`startup` 检查启动反馈及重试屏障。其余可选组为 `components`、`resources`、`localization`、`audio`、`network`、`list` 和 `showcase`。此入口不自动运行会修改项目资产的工作台检查，也不替代需要特定构建配置的检查。未传功能组时只显示用法。
+
 | 入口（位于 `tests/integration/`）                                                           | 前置条件与覆盖范围                                                                                                                               |
 | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [verify-workbench.mjs](../tests/integration/verify-workbench.mjs)                           | Creator 与 MCP 已连接；创建临时模块，检查脚本、Part、绑定、XLSX、删除及恢复。成功后回收，失败保留现场；`--keep-for-build` 可保留夹具供构建检查。 |
@@ -44,6 +53,8 @@ npm run test:showcase
 | [verify-build.mjs](../tests/integration/verify-build.mjs)                                   | 保留大厅示例，用 `serve-build.mjs` 启动构建产物并传入 URL；可选第二个参数为工作台测试模块 ID，额外检查 Part 代码按需加载。                       |
 | [verify-runtime.mjs](../tests/integration/verify-runtime.mjs)                               | 参数传入 Web 运行 URL，保留大厅示例；在独立窗口执行底层运行时回归。                                                                              |
 | [verify-framework-lifecycle.mjs](../tests/integration/verify-framework-lifecycle.mjs)       | 参数传入预览或 Web 运行 URL，保留展示模块；验证 UI 加载/显示取消、透明度、缓存复用、动态组件宿主和滚动文字/倒计时语言绑定，不修改编辑场景。      |
+| [verify-ui-ordering.mjs](../tests/integration/verify-ui-ordering.mjs)                       | 参数传入本机预览或 Web URL，保留默认首屏；真实鼠标检查三个弹窗的全部加载顺序、缓存重开、无变化不移动节点、慢清理期间输入恢复及跨层遮挡。         |
+| [verify-startup-feedback.mjs](../tests/integration/verify-startup-feedback.mjs)             | 参数传入本机预览或 Web URL，保留默认 GameRoot 与首屏；检查 SDK 超时、同步构造失败、业务启动失败的提前反馈、重入防护与清理后的重试。              |
 | [verify-audio.mjs](../tests/integration/verify-audio.mjs)                                   | 参数传入预览或 Web 构建 URL，保留大厅音频示例；验证前后台恢复、BGM 并发容量、取消和失败后的名额及引用回收，不保存编辑场景。                      |
 | [verify-ui-cleanup.mjs](../tests/integration/verify-ui-cleanup.mjs)                         | 参数传入本机预览或 Web 构建 URL，保留展示模块；验证缓存界面清理失败后仍释放其他实例、UI 层和资源。                                               |
 | [verify-showcase.mjs](../tests/integration/verify-showcase.mjs)                             | 参数传入 Web 运行 URL，保留全部示例；检查业务、导航、分包、持有回收及屏幕适配。                                                                  |

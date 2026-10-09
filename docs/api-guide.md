@@ -82,25 +82,25 @@ protected async onBoot(app: App, boot: BootContext): Promise<void> {
 }
 ```
 
-首屏和会话持有放在 `boot.scope`。失败必须抛出，不能在钩子中吞掉错误后假装成功；框架会先回收本次尝试，再交给 `onBootFailed` 展示错误。业务入口可在用户重试按钮中调用并处理 `this.retryBoot()`。并发重试共享当前尝试，已经启动成功不会再次执行。`app.inspect().boot` 给出状态与尝试次数。
+首屏和会话持有放在 `boot.scope`。失败必须抛出，不能在钩子中吞掉错误后假装成功。非取消故障发生时，框架先同步调用 `onBootCleaning(error)` 显示“启动失败，正在清理”，回收结束后启动 Promise 才拒绝；首次启动由 `start` 转交 `onBootFailed`。业务入口可在用户重试按钮中调用并处理 `this.retryBoot()`。清理期间的并发重试仍共享当前尝试，清理完成后才能开始下一次，已经启动成功不会再次执行。`app.inspect().boot` 给出状态与尝试次数，业务失败回收期间状态为 `cleaning`。
 
-自己装配 App 时使用 `await App.create(options)` 和 `app.boot.start(boot => ...)`。核心服务失败与业务启动失败分开处理；后者保留 App 核心用于错误界面和重试。不要在启动钩子里等待关闭、重试它自己。
+自己装配 App 时使用 `await App.create(options, onCleaning)` 和 `app.boot.start(boot => ..., onCleaning)`；第二个参数可省略。通知只用于展示状态，不等待其返回值，通知自身失败会报告且不会替换原始启动错误或跳过清理。核心服务失败与业务启动失败分开处理；后者保留 App 核心用于错误界面和重试。不要在启动钩子或清理通知里等待关闭、重试它自己。
 
 ### 框架钩子
 
-| 对象                   | 钩子                                   | 使用规则                                                  |
-| ---------------------- | -------------------------------------- | --------------------------------------------------------- |
-| `AppEntry`             | `appOptions`、`onBoot`、`onBootFailed` | 装配应用与选择启动流程；`onBoot` 可异步                   |
-| `UIView`               | `onCreate`                             | 一个实例执行一次，可异步；缓存复用不重复调用              |
-| `UIView`               | `onShow`                               | 每次展示执行，可异步；完成后才允许交互                    |
-| `UIView`               | `onHide`                               | 关闭或挂起时执行，可异步；旧 show 已取消                  |
-| `UIView`               | `onDispose`                            | 实例最终销毁时同步执行                                    |
-| `UIView`               | `onTick`、`onLateTick`                 | 可交互期间逐帧同步执行，参数含当前 show                   |
-| `GameComponent` / Part | `onInit`                               | 绑定和宿主就绪后同步执行一次                              |
-| `GameComponent` / Part | `onActivate`、`onDeactivate`           | 每次业务激活和失活；同步钩子，异步工作放 `activation.run` |
-| `GameComponent` / Part | `onReady`                              | 首次有效业务帧执行一次                                    |
-| `GameComponent` / Part | `onTick`、`onLateTick`                 | 激活期间逐帧同步执行；参数只有 dt                         |
-| `GameComponent` / Part | `onDispose`                            | 已初始化实例最终销毁时同步执行                            |
+| 对象                   | 钩子                                                     | 使用规则                                                                     |
+| ---------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `AppEntry`             | `appOptions`、`onBoot`、`onBootCleaning`、`onBootFailed` | 装配应用与选择启动流程；`onBoot` 可异步，`onBootCleaning` 只同步展示清理状态 |
+| `UIView`               | `onCreate`                                               | 一个实例执行一次，可异步；缓存复用不重复调用                                 |
+| `UIView`               | `onShow`                                                 | 每次展示执行，可异步；完成后才允许交互                                       |
+| `UIView`               | `onHide`                                                 | 关闭或挂起时执行，可异步；旧 show 已取消                                     |
+| `UIView`               | `onDispose`                                              | 实例最终销毁时同步执行                                                       |
+| `UIView`               | `onTick`、`onLateTick`                                   | 可交互期间逐帧同步执行，参数含当前 show                                      |
+| `GameComponent` / Part | `onInit`                                                 | 绑定和宿主就绪后同步执行一次                                                 |
+| `GameComponent` / Part | `onActivate`、`onDeactivate`                             | 每次业务激活和失活；同步钩子，异步工作放 `activation.run`                    |
+| `GameComponent` / Part | `onReady`                                                | 首次有效业务帧执行一次                                                       |
+| `GameComponent` / Part | `onTick`、`onLateTick`                                   | 激活期间逐帧同步执行；参数只有 dt                                            |
+| `GameComponent` / Part | `onDispose`                                              | 已初始化实例最终销毁时同步执行                                               |
 
 `onTick(dt)` 的 `dt` 是**秒**，60 FPS 时约为 `0.0167`。它是逐帧更新接口，与跨日、跨月通知无关。业务不覆盖引擎的 `onLoad`、`start`、`update` 等保留入口。自动绑定 getter 直接给出对应节点或组件；无需手动拖引用，节点变化后通过工作台更新绑定。
 

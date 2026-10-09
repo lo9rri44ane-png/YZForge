@@ -691,6 +691,8 @@ export class UIManager {
                 if (wasTop && this.accepting) void this.navigate(() => this.resumeTop()).catch(this.report);
             }
         });
+        // 界面已隐藏并取消交互；下层输入不应等待它的任务和资源清理。
+        this.updateInput();
         return record.closing;
     }
     private async hide(record: RecordView, reason: 'completed' | 'cancelled' | 'failed' | 'suspended'): Promise<void> {
@@ -737,12 +739,34 @@ export class UIManager {
         const active = Array.from(this.records.values())
             .filter((record) => record.interactive && !record.termination && !record.suspended)
             .sort((a, b) => layerOrder[a.definition.kind] - layerOrder[b.definition.kind] || a.id - b.id);
+        this.syncDisplayOrder(active);
         let blocked = false;
         for (const record of active.reverse()) {
             if (blocked) record.instance!.node.pauseSystemEvents(true);
             else record.instance!.node.resumeSystemEvents(true);
             if (record.definition.modal ?? (record.definition.kind === 'popup' || record.definition.kind === 'loading'))
                 blocked = true;
+        }
+    }
+    /** 显示和输入共用请求顺序；隐藏的缓存/准备实例留在可交互实例下面。 */
+    private syncDisplayOrder(active: readonly RecordView[]): void {
+        const groups = new Map<Node, Node[]>();
+        for (const record of active) {
+            const container = record.instance!.container;
+            const parent = container.parent;
+            if (!parent || !isValid(container, true)) continue;
+            let ordered = groups.get(parent);
+            if (!ordered) groups.set(parent, (ordered = []));
+            ordered.push(container);
+        }
+        for (const [parent, ordered] of groups) {
+            const offset = parent.children.length - ordered.length;
+            // 从顶层向下定位，后续移动不会打乱已经放好的上层节点。
+            for (let index = ordered.length - 1; index >= 0; index--) {
+                const container = ordered[index],
+                    target = offset + index;
+                if (container.getSiblingIndex() !== target) container.setSiblingIndex(target);
+            }
         }
     }
     private async dispose(instance: Instance): Promise<void> {

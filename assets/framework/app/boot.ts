@@ -1,10 +1,21 @@
-import { FrameworkError, invariant } from '../core/errors';
+import { ErrorReporter, FrameworkError, invariant, OperationCancelled, reportError } from '../core/errors';
 import { Lifetime, runTask, Scope, TaskContext } from '../core/scope';
 
 /** 启动尝试上下文；首次界面、会话和临时工作应使用这个 scope，以便失败时统一回收。 */
 export interface BootContext extends TaskContext {
     /** 从 1 开始的尝试序号，便于诊断重试。 */
     readonly attempt: number;
+}
+
+/** @internal 同步通知启动故障；通知失败不能中断清理或替换原始错误，正常取消不通知。 */
+export function notifyBootCleaning(error: unknown, observer?: ErrorReporter): void {
+    if (error instanceof OperationCancelled) return;
+    try {
+        // 不等待通知；即使调用方误用异步回调，也接住其拒绝，避免遗留未处理异常。
+        void Promise.resolve(observer?.(error)).catch(reportError);
+    } catch (notificationError) {
+        reportError(notificationError);
+    }
 }
 
 /**
@@ -15,7 +26,7 @@ export class BootFlow {
     private current?: Scope;
     private pending?: Promise<void>;
     private count = 0;
-    private phase: 'idle' | 'starting' | 'ready' | 'failed' = 'idle';
+    private phase: 'idle' | 'starting' | 'cleaning' | 'ready' | 'failed' = 'idle';
     /** @param owner 启动尝试的父级期限，App 默认使用应用业务流程期限。 */
     constructor(private readonly owner: Lifetime) {}
 
@@ -27,10 +38,11 @@ export class BootFlow {
     /**
      * 启动或重试；并发调用共享当前尝试，错误包含失败回收结果。
      * @param work 使用本次 BootContext.scope 持有首屏与会话；失败必须抛出。
+     * @param onCleaning 可选同步故障通知，在回收前显示状态；此时仍不能开始新的尝试，不等待其返回值。
      * @returns 启动成功才完成；失败先回收本次持有再拒绝，清理也失败则抛 BOOT_CLEANUP_FAILED。
      * @throws BOOT_ALREADY_READY 已启动成功；父级取消时拒绝新的尝试。
      */
-    start(work: (context: BootContext) => void | Promise<void>): Promise<void> {
+    start(work: (context: BootContext) => void | Promise<void>, onCleaning?: ErrorReporter): Promise<void> {
         if (this.pending) return this.pending;
         invariant(this.phase !== 'ready', 'BOOT_ALREADY_READY', 'Business startup already completed');
         this.owner.signal.throwIfAborted();
@@ -50,7 +62,9 @@ export class BootFlow {
                 this.phase = 'ready';
             })
             .catch(async (error) => {
+                this.phase = 'cleaning';
                 scope.cancel();
+                notifyBootCleaning(error, onCleaning);
                 try {
                     await scope.close();
                 } catch (cleanup) {

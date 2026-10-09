@@ -17,10 +17,10 @@ import { UIManager, ViewDefinition } from '../ui/ui-manager';
 import { ClockDriver, SystemClockDriver } from '../core/clock-driver';
 import { Events } from '../core/events';
 import { Scope, Lifetime } from '../core/scope';
-import { FrameworkError } from '../core/errors';
+import { ErrorReporter, FrameworkError } from '../core/errors';
 import { GameLog } from '../core/game-log';
 import { componentBindings, ComponentHost, allowInstanceComponents } from '../components/component-binding';
-import { BootFlow } from './boot';
+import { BootFlow, notifyBootCleaning } from './boot';
 import { BadgeStore } from '../badges/badge-store';
 import { HttpClient, type HttpClientOptions, type HttpTransport } from '../network/http-client';
 import { createPlatformHttpTransport } from '../network/transports';
@@ -216,8 +216,9 @@ export class App {
     /**
      * 构建应用核心；任何一步失败都会等待已创建部分清理后才拒绝。
      * 初始业务通过 app.boot.start 启动，使用 BootContext.scope 持有首屏和会话。
+     * @param onCleaning 可选同步故障通知，用于提前显示正在清理；不改变本 Promise 的清理屏障。
      */
-    static async create(input: AppOptions): Promise<App> {
+    static async create(input: AppOptions, onCleaning?: ErrorReporter): Promise<App> {
         let partial: App | undefined;
         try {
             const app = new App(input, (value) => {
@@ -226,6 +227,7 @@ export class App {
             await app.sdk.initialize();
             return app;
         } catch (error) {
+            notifyBootCleaning(error, onCleaning);
             try {
                 await partial?.close();
             } catch (cleanup) {

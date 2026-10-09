@@ -21,7 +21,8 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "verify": "npm run lint && npm run format:check && npm run typecheck && npm run check && npm test",
-    "test:showcase": "node --import ./tools/yzforge/register-tests.mjs --test tests/examples/*.test.ts"
+    "test:showcase": "node --import ./tools/yzforge/register-tests.mjs --test tests/examples/*.test.ts",
+    "test:integration": "node tests/integration/run.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

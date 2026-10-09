@@ -33,20 +33,32 @@ export class AppEntry extends Component {
     protected retryBoot(): Promise<void> {
         if (this.starting) return this.starting;
         if (this.ended) return Promise.reject(new OperationCancelled('App entry ended'));
-        this.starting = (async () => {
-            if (!this.app) this.app = await App.create(this.appOptions());
-            if (this.ended) {
-                await this.app.close();
-                throw new OperationCancelled('App entry ended');
-            }
-            await this.app.boot.start((boot) => this.onBoot(this.app!, boot));
-        })().finally(() => {
-            this.starting = undefined;
-        });
+        const onCleaning = (error: unknown) => {
+            if (!this.ended) return this.onBootCleaning(error);
+        };
+        // 先登记尝试，再执行构造和通知，避免同步构造失败时通知中的重试重入。
+        this.starting = Promise.resolve()
+            .then(async () => {
+                if (this.ended) throw new OperationCancelled('App entry ended');
+                if (!this.app) this.app = await App.create(this.appOptions(), onCleaning);
+                if (this.ended) {
+                    await this.app.close();
+                    throw new OperationCancelled('App entry ended');
+                }
+                await this.app.boot.start((boot) => this.onBoot(this.app!, boot), onCleaning);
+            })
+            .finally(() => {
+                this.starting = undefined;
+            });
         return this.starting;
     }
     /**
-     * 应用创建或 onBoot 失败时调用，默认记录错误，可重写显示失败页。
+     * 非取消启动故障已发生、清理尚未完成时同步调用。仅展示状态；重试仍复用当前尝试。
+     * 不要在这里等待 retryBoot；结束时原启动 Promise 才拒绝，start 再调用 onBootFailed。
+     */
+    protected onBootCleaning(_error: unknown): void {}
+    /**
+     * 应用创建或 onBoot 失败且清理结束后调用，默认记录错误，可重写显示失败页。
      * @param error 原始启动错误。
      */
     protected onBootFailed(error: unknown): void {
