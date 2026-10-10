@@ -4,7 +4,8 @@ import { eventKey } from '../../../../framework/core/events';
 export interface TaskCardModel {
     readonly id: number;
     readonly title: string;
-    readonly detail: string;
+    readonly progress: number;
+    readonly goal: number;
     readonly reward: number;
     readonly state: 'locked' | 'ready' | 'claimed';
 }

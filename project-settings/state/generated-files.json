@@ -25,10 +25,10 @@
   "assets/game/modules/showcase/code/generated/views.ts": "sha256:b2134b152b9ef8f15f02a089a348baa7622b50f11c9c362d89881c7a4f9d73ad",
   "assets/game/modules/showcase/contracts/generated/bundles.ts": "sha256:3215ed65765e0b676e6b77858a8428558c892680a205da6ecc233b5d739fadc2",
   "assets/game/modules/showcase/code/generated/dependencies.ts": "sha256:00df891b8f7062a53588a75662b3af84a1fb27f26739ac321c3e316f25bb3aa6",
-  "assets/game/modules/workshop/bundles/default/yz-index.json": "sha256:5dcc285a00cfca96bb41b3850b5a77ed34b64169d63bce089df8f842837264e0",
-  "assets/game/modules/workshop/contracts/generated/resources-default.ts": "sha256:718eaf8c1848a70ec8f3bb39fa0652fb016829030bc20441d9d8f3d8b8f83108",
+  "assets/game/modules/workshop/bundles/default/yz-index.json": "sha256:8180810f6c06035983e7bd5db284e0e50f1d997fab49d564291c462a07a71909",
+  "assets/game/modules/workshop/contracts/generated/resources-default.ts": "sha256:6cc6122b45c64e4e2d4b88c6ad97504fada4a72b0a2c6da1b8e4b5512a39e522",
   "assets/game/modules/workshop/contracts/generated/views.ts": "sha256:c8b157af1a1edcc1573b70c9d1a7a5477f9b7e79e7c0e47ce4e69cf43fd4138a",
-  "assets/game/modules/workshop/code/generated/views.ts": "sha256:9100ddfbb90d001875fa61b439197a020a6e467ecfded50e1b69261547e65603",
+  "assets/game/modules/workshop/code/generated/views.ts": "sha256:88bdf626a9da9f97e958241dc3f485b2a22470f15defecaa60e1072a73fda9c9",
   "assets/game/modules/workshop/contracts/generated/bundles.ts": "sha256:f4c320d4a4b0f4a1571cd06074f3ac042f1ae9a16f415ba9e00d72cf8457532f",
   "assets/game/modules/workshop/code/generated/dependencies.ts": "sha256:f138ade2cb855cf996f9076a454577cbe6c8561bba07777718e137c7825312be",
   "assets/game/modules/common/contracts/generated/config/Economy.types.ts": "sha256:41383979d1390172d19433e6268493d68b185c82f8bb51b2e5bbb7a366ee3c25",
@@ -63,5 +63,5 @@
   "assets/game/app/generated/game-config.ts": "sha256:c26f59c082af95b61ab253fa170c461c1a76e75806dbf4c81d1695806b49f069",
   "project-settings/generated/game-config.json": "sha256:295731163890f2c6604bd4e6f8707a202ef734c4e270fea0f82529ddb61b49b7",
   "assets/game/app/generated/channel-options.ts": "sha256:6481bfab3d64a2da4c273e3230d58a160d3633a828b634522852c4d740db3332",
-  "assets/game/app/generated/assembly.ts": "sha256:65b747f87ae63bd07ac36140997ced858f17668d60eee25372712440428dc469"
+  "assets/game/app/generated/assembly.ts": "sha256:6e846f92bc6b3f1b9db417f77ab09897c0e2fad8c3949c28bf714673c0e92b01"
 }

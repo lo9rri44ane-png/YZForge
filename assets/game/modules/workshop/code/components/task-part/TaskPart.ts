@@ -18,7 +18,7 @@ export class TaskPart extends TaskPartBinding {
         if (changed && this.currentActivation) this.bindBadge(this.currentActivation);
         if (claim) this.claim = claim;
         this.lblTitle.string = model.title;
-        this.lblDetail.string = model.detail;
+        this.lblDetail.string = `训练 ${model.progress} / ${model.goal} · 奖励 ${model.reward} 金币`;
         this.lblState.string = { locked: '未完成', ready: '可领取', claimed: '已领取' }[model.state];
         this.btnClaim.interactable = model.state === 'ready';
         const opacity = this.btnClaim.getComponent(UIOpacity);

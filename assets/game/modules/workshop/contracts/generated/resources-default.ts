@@ -7,6 +7,8 @@ export const WorkshopRes = {
         prefabsTaskPart: { id: 'workshop/default/prefab/prefabs/task-part', type: 'Prefab' },
         /** Prefab：workshop/default/prefab/ui/claim-popup。传给 assets.load，预制体用 instantiate，图片可用 setSprite。 */
         uiClaimPopup: { id: 'workshop/default/prefab/ui/claim-popup', type: 'Prefab' },
+        /** Prefab：workshop/default/prefab/ui/workflow-compact-page。传给 assets.load，预制体用 instantiate，图片可用 setSprite。 */
+        uiWorkflowCompactPage: { id: 'workshop/default/prefab/ui/workflow-compact-page', type: 'Prefab' },
         /** Prefab：workshop/default/prefab/ui/workflow-page。传给 assets.load，预制体用 instantiate，图片可用 setSprite。 */
         uiWorkflowPage: { id: 'workshop/default/prefab/ui/workflow-page', type: 'Prefab' },
     },

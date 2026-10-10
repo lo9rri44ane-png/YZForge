@@ -244,4 +244,15 @@ export const views: readonly ViewDefinition[] = [
         cache: 'none',
         duplicate: 'reject',
     },
+    {
+        id: 'workshop.workflow-compact-page',
+        module: 'workshop',
+        prefab: {
+            id: 'workshop/default/prefab/ui/workflow-compact-page',
+            type: 'Prefab',
+        },
+        kind: 'page',
+        cache: 'none',
+        duplicate: 'reject',
+    },
 ];

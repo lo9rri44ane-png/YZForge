@@ -4,6 +4,31 @@ import { Actions } from '../assets/framework/core/actions';
 import { Scope, taskContext } from '../assets/framework/core/scope';
 import { deferred, flush } from './fake-clock';
 
+test('exclusive remains busy until asynchronous cleanup finishes', async () => {
+    const owner = new Scope('view'),
+        actions = new Actions(owner),
+        cleanup = deferred();
+    let calls = 0;
+    assert.equal(
+        await actions.exclusive('claim', (task) => {
+            calls++;
+            task.scope.defer(() => cleanup.promise);
+            return 42;
+        }),
+        42,
+    );
+    await flush();
+    assert.equal(actions.busy('claim'), true);
+    await actions.exclusive('claim', () => {
+        calls++;
+    });
+    assert.equal(calls, 1);
+    cleanup.resolve();
+    await flush();
+    assert.equal(actions.busy('claim'), false);
+    await owner.close();
+});
+
 test('borrowed lifetimes cannot close their host and still own independent child work', async () => {
     const owner = new Scope('host');
     const borrowed = taskContext(owner).scope;

@@ -20,6 +20,25 @@
 
 页面展示、组件激活、实例借用仍各自拥有生命周期。原生通用控件可以独立使用；接入模块后使用该次激活的资源、音频、配置、时间和多语言入口。目录调整不增加轮询或全局组件扫描。
 
+## 界面状态与渲染约定
+
+业务统一采用 Service → ViewModel → View/Part 的职责划分，状态从前往后，类型化输入从 View 调用 ViewModel 方法。ViewModel 是普通函数或类，没有框架基类；简单静态界面可直接渲染参数，有少量动态数据时可在 onShow 内创建 State。复杂界面按独立区域组合多个 ViewModel/Part，不汇总成全局页面状态树。
+
+| 层            | 所有权与边界                                                               |
+| ------------- | -------------------------------------------------------------------------- |
+| Service       | 模块或业务会话持有共享事实、规则、配置、存档与网络；跨模块通过公开 API     |
+| ViewModel     | 默认每次显示创建，保存选择、筛选、加载、反馈；只暴露只读语义状态和明确操作 |
+| View/Part     | 持有节点、样式、布局、语言映射和显示资源；将输入连接到操作                 |
+| StateBindings | 每个显示/激活独立持有订阅和候选/当前资源，负责首绘、代次、错误与回收       |
+
+`State` 接受普通数据，复制并冻结新分支，保留既有快照分支的身份。订阅立即推送，后续同步按提交顺序通知；重入写入排队。订阅失败会解绑并单独上报，不回滚业务状态。无 Proxy、全局 store、自动依赖收集或隐式深度监听。高频坐标、粒子与动画仍使用组件帧逻辑，状态只承载需要观察的语义变化。
+
+`watch` 同步更新选中的区域；`prepare` 在独立候选 Scope 中准备资源，只有最新代次可以同步交接画面。旧资源在新内容成功提交后才回收；取消先阻止提交，再等待真实任务结束，不把显示资源放入结束即释放的 Actions Scope。`UIView` 在 onShow 和组件准备后核对必需绑定；普通组件仍在原生控件就绪后激活，自己的必需绑定就绪后才运行业务帧。动态 Part 的必需资源可在父级 prepare 中准备；若 Part 自身有异步绑定，隐藏的待显示容器内启用后显式等待 `assets.bindComponents(node)`，再交接画面。
+
+准备失败可通过区域 onError 保留旧画面并提供 refresh 重试；首份必需内容失败使打开失败，可选内容允许占位。选择器和同步渲染错误进入宿主故障通道。正常取消不显示为业务失败。确认、导航、音效等一次性行为通过显式端口/调用完成，不能保存成会被重新订阅执行的状态标记。业务成功以 Service 提交为准，渲染失败不能让奖励重复发放。
+
+换皮优先复用 ViewModel 实现，每个显示实例仍有独立局部状态。确需共享实例时由外部流程持有 ViewModel，并提供不依附单个 View 的交互端口；各 View 的 bindings 和资源独立。只换颜色/图片可复用 View，不同布局使用各自 View/Prefab。同一逻辑 Key 的皮肤在 App 创建前选择一次 Prefab，保持参数/结果合同；不同皮肤需要同时打开时登记不同 ViewKey，因此现有缓存身份已经隔离。暂不加入全局运行中热换肤、额外路由或缓存失效协议。
+
 `npm run check` 拒绝 core 越层依赖、组件基础设施加载上层实现、框架运行时循环及公开入口传递加载私有实现。类型依赖与值依赖分别检查。
 
 ## 业务模块
@@ -38,7 +57,7 @@ assets/game/modules/shop/
 │  ├─ ui/
 │  │  └─ home-page/
 │  │     ├─ HomePage.ts                 界面脚本
-│  │     ├─ HomePagePresenter.ts        按需创建
+│  │     ├─ HomePageViewModel.ts        按需创建
 │  │     └─ generated/HomePageBinding.ts
 │  ├─ components/
 │  │  └─ item-part/
@@ -58,7 +77,7 @@ assets/game/modules/shop/
       └─ yz-locale.json
 ```
 
-界面 ID 决定私有目录，类名决定文件名。内部界面的 `*.types.ts` 与脚本放在同一目录；公开界面的类型放在 `contracts/`，避免主包类型入口进入按需代码包。Presenter 与它服务的界面在一起，不设全模块 Presenter 文件夹。
+界面 ID 决定私有目录，类名决定文件名。内部界面的 `*.types.ts` 与脚本放在同一目录；公开界面的类型放在 `contracts/`，避免主包类型入口进入按需代码包。ViewModel 默认与它服务的逻辑界面放在一起，同一模块内的其他皮肤可复用；多个独立功能共同使用时再提取到模块内明确的功能目录。跨模块仍通过公开数据合同和 API 组合，不导入私有 ViewModel。
 
 跨模块的值导入、类型导入、转导出和静态动态导入全部经过对方 `public.ts`。`contracts/` 不能反向引用私有 `code/`；公开入口不能传递加载引擎组件或私有模块实现。应用生成装配只可直接加载 eager 模块工厂。读取资源或公开配置合同不要求启动模块业务实例。
 
@@ -66,7 +85,7 @@ assets/game/modules/shop/
 
 纯资源模块使用 `code.mode: none`，没有 `code/`、模块工厂或 ModuleRef，但仍生成 `public.ts` 暴露资源和公开配置。配置表、枚举必须显式公开。包含业务代码的模块才在 `contracts/api.ts` 中提供对应的 `<Module>Api`。
 
-`module.json` 不接受 `code.root`、`bundle.root`、界面或 Part 的 `script/binding/types/presenter/directory`。这些路径由规则派生；实际组件 UUID 和 ccclass 保持 Creator 身份。新增内容通过工作台创建，已有资产移动通过 AssetDB 保留 `.meta` 与 UUID。
+`module.json` 不接受 `code.root`、`bundle.root`、界面或 Part 的 `script/binding/types/viewModel/directory`（旧 `presenter` 字段同样拒绝）。这些路径由规则派生；实际组件 UUID 和 ccclass 保持 Creator 身份。新增内容通过工作台创建，已有资产移动通过 AssetDB 保留 `.meta` 与 UUID。
 
 ## 源文件、持久状态和生成物
 

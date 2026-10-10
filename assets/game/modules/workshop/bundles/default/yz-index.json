@@ -18,6 +18,14 @@
         "workshop"
       ]
     },
+    "workshop/default/prefab/ui/workflow-compact-page": {
+      "bundle": "m-workshop",
+      "path": "dynamic/ui/WorkflowCompactPage",
+      "type": "Prefab",
+      "requiredCodeModules": [
+        "workshop"
+      ]
+    },
     "workshop/default/prefab/ui/workflow-page": {
       "bundle": "m-workshop",
       "path": "dynamic/ui/WorkflowPage",

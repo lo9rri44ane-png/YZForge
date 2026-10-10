@@ -4,12 +4,12 @@
 
 ## 启动与模块
 
-`Bootstrap.scene → GameRoot → start-game.ts → ShowcasePage`。`GameRoot` 装配通用服务，`app/start-game.ts` 打开首屏；后续跳转由模块内的页面调用 `show.ui`。任务奖励等业务规则由所属模块的 Service 管理，复杂交互由模块内的 Presenter 协调。`app/generated` 继续由工具维护。
+`Bootstrap.scene → GameRoot → start-game.ts → ShowcasePage`。`GameRoot` 装配通用服务，`app/start-game.ts` 打开首屏；后续跳转由模块内的页面调用 `show.ui`。任务奖励等业务规则由所属模块的 Service 管理，复杂交互由模块内的 ViewModel 协调。`app/generated` 继续由工具维护。
 
 | 模块     | 职责                                                              | 关系                                               |
 | -------- | ----------------------------------------------------------------- | -------------------------------------------------- |
 | showcase | 功能首页、UI/数据/时间/异步/存档实验、开发指南                    | 使用公开表与事件合同，不直接导入其他模块的私有实现 |
-| workshop | 按需加载的训练任务、领取确认、动态 TaskPart、Service 与 Presenter | 声明 Profile API 依赖，读取 common 公共表          |
+| workshop | 按需加载的训练任务、领取确认、动态 TaskPart、Service 与 ViewModel | 声明 Profile API 依赖，读取 common 公共表          |
 | lobby    | 配置、图片、奖励弹窗、余额 Part、音效与日期的综合示例             | 依赖 Profile API，读取 common 公共表               |
 | profile  | 共享账号余额、领取去重、本地存档、订阅                            | 纯代码模块，无资源包                               |
 | common   | 公共 EconomyTable                                                 | 纯资源模块，不创建业务工厂                         |

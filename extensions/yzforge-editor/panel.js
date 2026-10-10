@@ -191,7 +191,7 @@ exports.ready = function () {
             generic = ['part', 'prefab'].includes(kind);
         el('moduleOptions').hidden = kind !== 'module';
         el('bundleOptions').hidden = !(ui || generic || kind === 'table');
-        el('presenterOptions').hidden = !ui;
+        el('viewModelOptions').hidden = !ui;
         el('adoptOptions').hidden = !generic;
         if (val('delivery') === 'none') el('initial').value = 'resources';
         el('roleHelp').textContent = {
@@ -652,7 +652,7 @@ exports.ready = function () {
     );
     on('module', moduleChanged, 'change');
     on('kind', role, 'change');
-    for (const id of ['newName', 'displayName', 'delivery', 'initial', 'bundle', 'presenter', 'publicView', 'adopt'])
+    for (const id of ['newName', 'displayName', 'delivery', 'initial', 'bundle', 'viewModel', 'publicView', 'adopt'])
         on(id, invalidateCreate, 'input');
     on('delivery', role, 'change');
     on('refresh', () => run('refresh'));
@@ -674,7 +674,7 @@ exports.ready = function () {
                 delivery: val('delivery'),
                 displayName: val('displayName'),
                 codeOnly: val('initial') === 'code',
-                presenter: el('presenter').checked,
+                viewModel: el('viewModel').checked,
                 visibility: el('publicView').checked ? 'public' : 'internal',
                 prefabUUID: ['part', 'prefab'].includes(val('kind')) ? val('adopt') : undefined,
             });

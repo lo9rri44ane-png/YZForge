@@ -23,7 +23,7 @@ export class Actions {
     ) {}
 
     /**
-     * 当前命名操作是否仍在执行或排队；不创建操作。
+     * 当前命名操作是否仍在执行、清理或排队；不创建操作。
      * @param key 与 latest/exclusive/serial 使用的名称一致。
      */
     busy(key: string): boolean {
@@ -47,7 +47,7 @@ export class Actions {
     }
 
     /**
-     * 同名操作执行期间忽略重复触发并返回 undefined；不会重复执行回调，也不自动重试业务提交。
+     * 同名操作执行及清理期间忽略重复触发并返回 undefined；不会重复执行回调，也不自动重试业务提交。
      * @param key 防重复的操作名，例如 claim-reward；不同名称可并行。
      * @param work 首次触发要执行的工作；异常交给调用方，不自动重试。
      * @returns 首次调用结果，重复触发为 undefined；宿主结束时拒绝为 OperationCancelled。
@@ -131,8 +131,11 @@ export class Actions {
             )
             .then(async () => {
                 finished = true;
-                if (this.running.get(key) === running) this.running.delete(key);
-                await scope.close();
+                try {
+                    await scope.close();
+                } finally {
+                    if (this.running.get(key) === running) this.running.delete(key);
+                }
             });
         void completed.catch(reportError);
         const running: Running<T> = { scope, result, completed };

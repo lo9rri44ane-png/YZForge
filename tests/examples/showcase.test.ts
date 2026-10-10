@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Scope, taskContext } from '../../assets/framework/core/scope';
-import { Actions } from '../../assets/framework/core/actions';
+import { Scope } from '../../assets/framework/core/scope';
 import { Events } from '../../assets/framework/core/events';
 import { BadgeStore } from '../../assets/framework/badges/badge-store';
 import { TimeService } from '../../assets/framework/time/time-service';
@@ -9,18 +8,16 @@ import { Storage } from '../../assets/framework/storage/storage';
 import { WalletService } from '../../assets/game/modules/profile/code/services/WalletService';
 import { TaskService } from '../../assets/game/modules/workshop/code/services/TaskService';
 import { TaskBadges, taskBadge } from '../../assets/game/modules/workshop/contracts/badges';
-import { WorkflowPagePresenter } from '../../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPagePresenter';
+import { WorkflowPageViewModel } from '../../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPageViewModel';
 import { LabClock } from '../../assets/game/modules/showcase/code/services/LabClock';
 import { StorageLab, LabWallet, LabStorageBackend } from '../../assets/game/modules/showcase/code/services/StorageLab';
 import type { ModuleContext } from '../../assets/framework/modules/module-manager';
 import type { ProfileApi } from '../../assets/game/modules/profile/public';
 import type { TasksRow } from '../../assets/game/modules/workshop/contracts/generated/config/Tasks.types';
-import type { ViewUI, ViewResult } from '../../assets/framework/ui/ui-manager';
-import type { ViewShowContext } from '../../assets/framework/ui/ui-view';
-import type { WorkflowPageParams } from '../../assets/game/modules/workshop/contracts/WorkflowPage.types';
+import type { ViewResult } from '../../assets/framework/ui/ui-manager';
 import { flush, deferred } from '../fake-clock';
 const row: TasksRow = { id: 1, name: '初次训练', goal: 1, reward: 20, quality: 'normal', economy: 1 };
-async function setup() {
+async function setup(rows: readonly TasksRow[] = [row]) {
     const scope = new Scope('example-test');
     const backend = new LabStorageBackend();
     const storage = new Storage('test:', backend);
@@ -31,7 +28,7 @@ async function setup() {
         badges: new BadgeStore(scope),
         config: {
             in: () => ({
-                loadMany: async () => ({ tasks: { all: () => [row] }, economy: { require: () => ({ id: 1 }) } }),
+                loadMany: async () => ({ tasks: { all: () => rows }, economy: { require: () => ({ id: 1 }) } }),
             }),
         },
     } as unknown as ModuleContext;
@@ -121,93 +118,72 @@ test('simulated domain failure and training write failure leave old state unchan
     }
 });
 
-test('Presenter waits for confirmation, ignores duplicate clicks, and renders through a node-free port', async () => {
-    const s = await setup();
-    const showScope = s.scope.child('show');
-    const answer = deferred<ViewResult<boolean>>();
-    let opens = 0,
-        renders = 0;
-    const ui = {
-        open: async () => {
+test('ViewModel waits for confirmation and coalesces duplicate commands without a rendering port', async () => {
+    const s = await setup(),
+        show = s.scope.child('show'),
+        answer = deferred<ViewResult<boolean>>();
+    let opens = 0;
+    const model = new WorkflowPageViewModel(s.tasks, show, {
+        confirm: () => {
             opens++;
-            return { result: answer.promise };
+            return answer.promise;
         },
-    } as unknown as ViewUI;
-    const show = { ...taskContext(showScope), actions: new Actions(showScope) } as ViewShowContext<
-        WorkflowPageParams,
-        void
-    >;
-    const presenter = new WorkflowPagePresenter(
-        s.tasks,
-        { ...show, ui },
-        {
-            mount: async (cards) => {
-                assert.equal(cards.length, 1);
-            },
-            render: () => {
-                renders++;
-            },
-        },
-    );
+    });
     try {
-        await presenter.start();
-        presenter.train();
-        const first = presenter.claim(1),
-            repeated = presenter.claim(1);
+        await Promise.all([model.start(), model.start()]);
+        assert.equal(model.state.value.cards.length, 1);
+        model.train();
+        const first = model.claim(1),
+            repeated = model.claim(1);
         await flush();
         assert.equal(opens, 1);
+        assert.equal(model.state.value.claiming, true);
         assert.equal(s.wallet.snapshot().coins, 0);
         answer.resolve({ status: 'completed', value: true });
         await Promise.all([first, repeated]);
         await flush();
-        assert.equal(s.wallet.snapshot().coins, 20);
-        assert.ok(renders >= 3);
-        await showScope.close();
-        const count = renders;
+        assert.equal(model.state.value.coins, 20);
+        assert.equal(model.state.value.feedback.code, 'granted');
+        assert.equal(model.state.value.claiming, false);
+        await show.close();
+        const before = model.state.value;
         s.tasks.train();
         await flush();
-        assert.equal(renders, count, 'ended show must not receive business event rendering');
+        assert.equal(model.state.value, before);
     } finally {
         await s.scope.close();
     }
 });
 
-test('Presenter observes external wallet and claim changes and stops both subscriptions with its show', async () => {
-    const s = await setup();
-    const showScope = s.scope.child('observed-show');
-    const show = { ...taskContext(showScope), actions: new Actions(showScope) } as ViewShowContext<
-        WorkflowPageParams,
-        void
-    >;
-    let summary = '',
-        cardState = '',
-        renders = 0;
-    const presenter = new WorkflowPagePresenter(s.tasks, show, {
-        mount: async () => {},
-        render: (cards, text) => {
-            summary = text;
-            cardState = cards[0].state;
-            renders++;
-        },
-    });
+test('two skins share business facts while keeping local selection and lifetimes independent', async () => {
+    const s = await setup([row, { ...row, id: 2, name: '第二项' }]);
+    const a = s.scope.child('cards'),
+        b = s.scope.child('compact');
+    const effects = { confirm: async (): Promise<ViewResult<boolean>> => ({ status: 'cancelled' }) };
+    const cards = new WorkflowPageViewModel(s.tasks, a, effects),
+        compact = new WorkflowPageViewModel(s.tasks, b, effects);
     try {
-        await presenter.start();
+        await Promise.all([cards.start(), compact.start()]);
+        compact.select(2);
+        assert.equal(cards.state.value.selectedId, 1);
+        assert.equal(compact.state.value.selectedId, 2);
         s.tasks.train();
         await flush();
-        assert.equal(cardState, 'ready');
+        assert.equal(cards.state.value.cards[0].state, 'ready');
+        const branch = cards.state.value.cards;
         s.wallet.changeCoins(7);
-        await flush();
-        assert.match(summary, /余额 7 金币/);
+        assert.equal(cards.state.value.coins, 7);
+        assert.equal(compact.state.value.coins, 7);
+        assert.equal(cards.state.value.cards, branch, 'unrelated wallet changes preserve card branch identity');
         s.wallet.claimReward('workshop/task/1', 20);
-        await flush();
-        assert.match(summary, /余额 27 金币/);
-        assert.equal(cardState, 'claimed');
-        await showScope.close();
-        const before = renders;
+        assert.equal(cards.state.value.cards[0].state, 'claimed');
+        assert.equal(compact.state.value.cards[0].state, 'claimed');
+        await a.close();
+        const ended = cards.state.value;
         s.wallet.changeCoins(3);
-        s.tasks.train();
-        await flush();
-        assert.equal(renders, before);
+        assert.equal(cards.state.value, ended);
+        assert.equal(compact.state.value.coins, 30);
+        assert.equal(compact.state.value.selectedId, 2);
     } finally {
         await s.scope.close();
     }
@@ -241,53 +217,62 @@ test('task observer removes both sources on unsubscribe or initial callback fail
     }
 });
 
-test('cancelling confirmation leaves progress and wallet unchanged', async () => {
-    const s = await setup();
-    const show = { ...taskContext(s.scope), actions: new Actions(s.scope) } as ViewShowContext<
-        WorkflowPageParams,
-        void
-    >;
-    const ui = { open: async () => ({ result: Promise.resolve({ status: 'cancelled' }) }) } as unknown as ViewUI;
-    const presenter = new WorkflowPagePresenter(s.tasks, { ...show, ui }, { mount: async () => {}, render: () => {} });
-    try {
-        await presenter.start();
-        presenter.train();
-        await presenter.claim(1);
-        assert.deepEqual(s.tasks.snapshot(), { progress: 1, coins: 0 });
-        assert.equal(s.wallet.hasReward('workshop/task/1'), false);
-    } finally {
-        await s.scope.close();
+test('cancelled and failed confirmation remain distinct and neither commits rewards', async () => {
+    for (const outcome of [
+        { status: 'cancelled' } as const,
+        { status: 'failed', error: Error('UI fault'), cleanupPending: true } as const,
+    ]) {
+        const s = await setup();
+        const cleanup = deferred();
+        const model = new WorkflowPageViewModel(s.tasks, s.scope, {
+            confirm: async (_card, owner) => {
+                owner.defer(() => cleanup.promise);
+                return outcome;
+            },
+        });
+        try {
+            await model.start();
+            model.train();
+            await model.claim(1);
+            assert.equal(
+                model.state.value.feedback.code,
+                outcome.status === 'cancelled' ? 'cancelled' : 'confirmation-failed',
+            );
+            assert.equal(model.state.value.claiming, true);
+            if (outcome.status === 'failed') assert.equal(model.state.value.feedback.cleanupPending, true);
+            assert.deepEqual(s.tasks.snapshot(), { progress: 1, coins: 0 });
+            assert.equal(s.wallet.hasReward('workshop/task/1'), false);
+            cleanup.resolve();
+            await flush();
+            assert.equal(model.state.value.claiming, false);
+            assert.equal(!!model.state.value.feedback.cleanupPending, false);
+        } finally {
+            cleanup.resolve();
+            await s.scope.close();
+        }
     }
 });
 
-test('failed confirmation is reported distinctly and never commits a reward', async () => {
-    const s = await setup();
-    const show = { ...taskContext(s.scope), actions: new Actions(s.scope) } as ViewShowContext<
-        WorkflowPageParams,
-        void
-    >;
-    const ui = {
-        open: async () => ({
-            result: Promise.resolve({ status: 'failed', error: Error('UI fault'), cleanupPending: false }),
-        }),
-    } as unknown as ViewUI;
-    let summary = '';
-    const presenter = new WorkflowPagePresenter(
-        s.tasks,
-        { ...show, ui },
-        {
-            mount: async () => {},
-            render: (_cards, text) => {
-                summary = text;
-            },
-        },
-    );
+test('a display fault cannot turn a committed reward into a failed business operation', async () => {
+    const s = await setup(),
+        faults: unknown[] = [];
+    const model = new WorkflowPageViewModel(s.tasks, s.scope, {
+        confirm: async () => ({ status: 'completed', value: true }),
+    });
     try {
-        await presenter.start();
-        presenter.train();
-        await presenter.claim(1);
-        assert.equal(s.wallet.snapshot().coins, 0);
-        assert.match(summary, /确认界面失败，未提交领取/);
+        await model.start();
+        model.train();
+        model.state.subscribe(
+            s.scope,
+            (state) => {
+                if (state.coins) throw Error('skin broken');
+            },
+            (error) => faults.push(error),
+        );
+        await model.claim(1);
+        assert.equal(model.state.value.feedback.code, 'granted');
+        assert.equal(s.wallet.snapshot().coins, 20);
+        assert.equal(faults.length, 1);
     } finally {
         await s.scope.close();
     }

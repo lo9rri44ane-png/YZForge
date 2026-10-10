@@ -2,7 +2,7 @@
 const path = require('node:path');
 const version = 3;
 const idPattern = /^[a-z][a-z0-9-]*$/;
-const derivedItem = ['directory', 'script', 'binding', 'types', 'presenter'];
+const derivedItem = ['directory', 'script', 'binding', 'types', 'presenter', 'viewModel'];
 function itemPaths(kind, id, item) {
     if (!idPattern.test(id)) throw Error(`无效条目标识：${id}`);
     const name = item.className?.split('.').at(-1);
@@ -15,7 +15,7 @@ function itemPaths(kind, id, item) {
         ...(kind === 'view'
             ? {
                   types: `${item.visibility === 'public' ? 'contracts' : directory}/${name}.types.ts`,
-                  presenter: `${directory}/${name}Presenter.ts`,
+                  viewModel: `${directory}/${name}ViewModel.ts`,
               }
             : {}),
     };

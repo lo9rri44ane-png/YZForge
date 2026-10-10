@@ -141,16 +141,22 @@ await panel(
     'root.querySelector("[data-tab=create]").click();set("module","lobby","change");set("kind","page","change");el("publicView").checked=false;el("publicView").dispatchEvent(new Event("input"));set("newName","Inventory");',
 );
 await until('return !el("create").disabled;');
-assert.equal(await panel('return el("presenterOptions").open;'), false);
-await panel('el("presenterOptions").open=true;');
+assert.equal(await panel('return el("viewModelOptions").open;'), false);
+await panel('el("viewModelOptions").open=true;');
 // 页面公开范围必须参与创建预览和签名；Key 由创建后的生成步骤更新。
 assert.deepEqual(
     await panel(
-        'return {checked:el("publicView").checked,hidden:el("presenterOptions").hidden,kind:el("kind").value};',
+        'return {checked:el("publicView").checked,hidden:el("viewModelOptions").hidden,kind:el("kind").value};',
     ),
     { checked: false, hidden: false, kind: 'page' },
 );
 assert.match(await panel('return el("createPreview").textContent;'), /InventoryPage\.types\.ts/);
+await panel('el("viewModel").checked=true;el("viewModel").dispatchEvent(new Event("input"));');
+await until('return !el("create").disabled;');
+assert.match(await panel('return el("createPreview").textContent;'), /InventoryPageViewModel\.ts/);
+await panel('el("viewModel").checked=false;el("viewModel").dispatchEvent(new Event("input"));');
+await until('return !el("create").disabled;');
+assert.doesNotMatch(await panel('return el("createPreview").textContent;'), /InventoryPageViewModel\.ts/);
 await panel('el("publicView").checked=true;el("publicView").dispatchEvent(new Event("input"));');
 await until('return !el("create").disabled;');
 assert.equal(

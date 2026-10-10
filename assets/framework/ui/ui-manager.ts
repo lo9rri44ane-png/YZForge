@@ -11,6 +11,7 @@ import { ModuleContext, ModuleManager } from '../modules/module-manager';
 import { TimeService } from '../time/time-service';
 import { UIView, ViewShowContext } from './ui-view';
 import { Actions } from '../core/actions';
+import { StateBindings } from '../core/state-bindings';
 import { ScopedLocalization } from './localization/localized-ui';
 
 /** 框架支持的完整界面类别；Part 不属于 UI 页面栈。 */
@@ -511,9 +512,13 @@ export class UIManager {
         const scope = instance.scope.child(`show:${++this.showing}`);
         const isCurrent = () => record.show === context && !record.termination && !record.suspended;
         const scopedAssets = instance.context.assets.in(scope);
+        const fault = (error: unknown) => {
+            void this.requestClose(record, { status: 'failed', error, cleanupPending: false }).catch(this.report);
+        };
         const context: ViewShowContext<unknown, unknown> = Object.freeze({
             ...taskContext(scope, isCurrent),
             actions: new Actions(scope.lifetime, isCurrent),
+            bindings: new StateBindings(scope.lifetime, isCurrent, fault),
             assets: scopedAssets,
             i18n: new ScopedLocalization(instance.context.i18n, scopedAssets, scope.lifetime, isCurrent),
             config: instance.context.config.in(scope),
@@ -564,15 +569,16 @@ export class UIManager {
         record.show = context;
         instance.host.begin(scope);
         record.suspended = false;
-        instance.view.__bind(instance.context, (error) => {
-            void this.requestClose(record, { status: 'failed', error, cleanupPending: false }).catch(this.report);
-        });
+        instance.view.__bind(instance.context, fault);
         instance.node.active = true;
         this.setVisible(instance, false);
         this.setInteractive(record, false);
         await runTask(scope, () => instance.view.__show(context), isCurrent, 'onShow');
+        await context.bindings.ready();
         if (record.termination || scope.signal.aborted) return;
         await instance.host.prepare();
+        // 组件准备也可能更新 ViewModel，交接画面前再次核对所有区域的当前代次。
+        await context.bindings.ready();
     }
     private activateShow(record: RecordView): void {
         const instance = record.instance!;

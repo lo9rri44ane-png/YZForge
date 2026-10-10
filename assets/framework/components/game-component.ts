@@ -4,6 +4,7 @@ import type { ConfigAccess } from '../config/config-access';
 import type { AudioAccess } from '../audio/audio-access';
 import type { LocalizationAccess } from '../ui/localization/localization-access';
 import { Actions } from '../core/actions';
+import { StateBindings } from '../core/state-bindings';
 import type { ModuleContext } from '../modules/module-manager';
 import type { TimeAccess } from '../time/time-access';
 import { registerComponentBinding } from './component-binding';
@@ -15,6 +16,8 @@ const { ccclass } = _decorator;
  * 组件或 Part 的一次业务激活上下文；禁用或宿主结束时取消，重新激活得到新上下文。
  */
 export interface ActivationContext extends TaskContext {
+    /** 本次激活的状态绑定；必需准备完成后才运行业务帧。 */
+    readonly bindings: StateBindings;
     /** 本次激活的多语言使用入口；实例池复用不会保留上次绑定。 */
     readonly i18n: LocalizationAccess;
     /** 本次激活的资源入口；禁用后归还，重新激活使用新的入口。 */
@@ -52,6 +55,8 @@ export class GameComponent extends Component {
     private draining?: Promise<void>;
     private initialized = false;
     private ready = false;
+    private prepared = false;
+    private preparation: Promise<void> = Promise.resolve();
     private disposed = false;
     private allowed = false;
     private engineLoaded = false;
@@ -171,7 +176,7 @@ export class GameComponent extends Component {
      * 引擎生命周期适配入口，由框架调用；业务请重写对应的 onShow、onActivate、onTick 等框架钩子。
      */
     update(dt: number): void {
-        if (!this.activation || this.activation.signal.aborted) return;
+        if (!this.activation || this.activation.signal.aborted || !this.prepared) return;
         try {
             if (!this.ready) {
                 this.ready = true;
@@ -189,7 +194,7 @@ export class GameComponent extends Component {
      * 引擎生命周期适配入口，由框架调用；业务请重写对应的 onShow、onActivate、onTick 等框架钩子。
      */
     lateUpdate(dt: number): void {
-        if (!this.activation || this.activation.signal.aborted || !this.ready) return;
+        if (!this.activation || this.activation.signal.aborted || !this.ready || !this.prepared) return;
         try {
             synchronous(this.onLateTick(dt), 'onLateTick');
         } catch (error) {
@@ -218,20 +223,41 @@ export class GameComponent extends Component {
         if (this.activation || !this.owner || this.owner.signal.aborted || this.disposed) return;
         const scope = this.owner.child(`activation:${this.name}`);
         const current = () => this.activation === activation;
+        const fault = (error: unknown) => {
+            this.allowed = false;
+            void this.__deactivate().catch(reportError);
+            reportError(error);
+        };
         const activation: ActivationContext = Object.freeze({
             ...taskContext(scope, current),
             ...this.ctx.componentServices(scope, current),
             actions: new Actions(scope.lifetime, current),
+            bindings: new StateBindings(scope.lifetime, current, fault),
             run: <T>(task: (context: TaskContext) => T | Promise<T>) => runTask(scope, task, current),
         });
         this.activation = activation;
+        this.prepared = false;
         try {
             synchronous(this.onActivate(activation), 'onActivate');
+            this.preparation = activation.bindings.ready().then(() => {
+                if (current() && !scope.signal.aborted) this.prepared = true;
+            });
+            void this.preparation.catch((error) => {
+                if (!scope.signal.aborted) fault(error);
+            });
         } catch (error) {
             this.allowed = false;
             void this.__deactivate().catch(reportError);
             throw error;
         }
+    }
+    /** @internal 宿主等待本次激活的必需状态绑定；缓存重开先等旧激活清理。 */
+    async __prepared(): Promise<void> {
+        if (this.draining) await this.draining;
+        this.owner?.signal.throwIfAborted();
+        if (!this.allowed || !this.enabledInHierarchy || !this.initialized) return;
+        this.activate();
+        await this.preparation;
     }
     /**
      * @internal
@@ -243,6 +269,7 @@ export class GameComponent extends Component {
         const activation = this.activation;
         if (!activation) return Promise.resolve();
         this.activation = undefined;
+        this.prepared = false;
         const scope = scopeOwner(activation.scope);
         let failure: { reason: unknown } | undefined;
         // 先发布完整屏障再取消，取消监听和停用钩子重入时也拿到同一结果。

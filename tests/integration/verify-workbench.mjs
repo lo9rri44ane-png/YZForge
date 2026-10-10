@@ -90,9 +90,20 @@ const serialized=cce.Utils.serialize(prefab);return {rootId,content:typeof seria
         title: 'yzforge.CountdownLabel',
         state: 'yzforge.Switch',
     });
-    await create({ kind: 'popup', id: 'Reward', module, bundle: 'default', presenter: true });
+    await create({ kind: 'popup', id: 'Reward', module, bundle: 'default', viewModel: true });
+    const modelSource = await readFile(
+        resolve(root, 'assets/game/modules', module, 'code/ui/reward-popup/RewardPopupViewModel.ts'),
+        'utf8',
+    );
+    const viewSource = await readFile(
+        resolve(root, 'assets/game/modules', module, 'code/ui/reward-popup/RewardPopup.ts'),
+        'utf8',
+    );
+    assert.match(modelSource, /readonly state = this\.data\.readonly/);
+    assert.doesNotMatch(modelSource, /from ['"]cc['"]|ViewShowContext|render\(/);
+    assert.match(viewSource, /show\.bindings\.watch\(\s*model\.state/);
     await create({ kind: 'table', id: 'entries', module, bundle: 'default' });
-    console.log('PASS: Part binding is serialized without dragging; Popup/Presenter and XLSX outputs are generated');
+    console.log('PASS: Part binding is serialized without dragging; Popup/ViewModel and XLSX outputs are generated');
     const workbookSource = 'config-source/' + module + '/entries.xlsx';
     const tablePath = resolve(root, 'assets/game/modules/' + module + '/bundles/default/dynamic/config/entries.json');
     let workbook = await readWorkbook(root, workbookSource);

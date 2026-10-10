@@ -181,13 +181,47 @@ exports.scaffold = async function (p, args) {
                 layout.importPath(paths.binding, paths.types),
             ),
             [path.join(code, `${className}.ts`)]:
-                `import { _decorator } from 'cc';\nimport { ${className}Binding } from './generated/${className}Binding';\nconst { ccclass } = _decorator;\n/** 完整 UI 的渲染与输入入口；节点来自 Binding，可按复杂度把业务规则委托给 Service/Presenter。 */\n@ccclass('${manifest.id}.${className}')\nexport class ${className} extends ${className}Binding {\n  // 按需重写 onCreate/onShow/onHide/onDispose，不覆盖引擎生命周期。\n  // onShow(show: ViewShowContext<本界面Params, 本界面Result>) 可异步加载。\n  // 临时资源优先用 show.assets/show.config/show.audio，await 后通过 show.commit 同步修改节点。\n  // 点击监听使用 show.listen；成功用 show.finish(result)，取消用 show.dismiss()，返回用 show.ui.back()。\n}\n`,
+                `import { _decorator } from 'cc';\nimport { ${className}Binding } from './generated/${className}Binding';\nconst { ccclass } = _decorator;\n/** 完整 UI 的渲染与输入入口；节点来自 Binding，可按复杂度把业务规则委托给 Service/ViewModel。 */\n@ccclass('${manifest.id}.${className}')\nexport class ${className} extends ${className}Binding {\n  // 按需重写 onCreate/onShow/onHide/onDispose，不覆盖引擎生命周期。\n  // onShow(show: ViewShowContext<本界面Params, 本界面Result>) 可异步加载。\n  // 临时资源优先用 show.assets/show.config/show.audio，await 后通过 show.commit 同步修改节点。\n  // 点击监听使用 show.listen；成功用 show.finish(result)，取消用 show.dismiss()，返回用 show.ui.back()。\n}\n`,
         };
-        if (args.presenter) {
-            files[path.join(code, `${className}Presenter.ts`)] =
-                `import type { TaskContext } from '${path.relative(code, inside('assets/framework/core/scope')).replaceAll('\\', '/')}';\n/** Presenter 需要的最小渲染接口；按实际展示模型补充参数，不暴露内部节点。 */\nexport interface ${className}Port {\n    /** 同步把展示数据渲染到节点，异步取数由 Presenter 组织。 */\n    render(): void;\n}\n/** 组织界面展示流程；跨界面共享的业务状态交给模块 Service，节点渲染交给 Port。 */\nexport class ${className}Presenter {\n    /** @param view - 本次展示使用的渲染接口。 */\n    constructor(private readonly view: ${className}Port) {}\n    /**\n     * 在当前展示仍有效时触发渲染；扩展异步流程时 await 后仍通过 task.commit 提交。\n     * @param task - 当前展示/任务上下文，不应跨展示保存。\n     */\n    show(task: TaskContext): void { task.signal.throwIfAborted(); task.commit(() => this.view.render()); }\n}\n`;
-            files[path.join(code, `${className}.ts`)] =
-                `import { _decorator } from 'cc';\nimport type { TaskContext } from '${path.relative(code, inside('assets/framework/core/scope')).replaceAll('\\', '/')}';\nimport { ${className}Binding } from './generated/${className}Binding';\nimport { ${className}Presenter } from './${className}Presenter';\nconst { ccclass } = _decorator;\n/** 界面负责节点和输入，把展示流程交给 Presenter；共享业务规则放在模块 Service。 */\n@ccclass('${manifest.id}.${className}')\nexport class ${className} extends ${className}Binding {\n    /**\n     * 每次显示时创建展示协调器；隐藏或被替换后旧 show 失效。\n     * @param show - 本次展示任务上下文。需要 params/time/listen 时使用完整 ViewShowContext 类型。\n     */\n    protected onShow(show: TaskContext): void { new ${className}Presenter(this).show(show); }\n    /** 同步更新自动绑定的节点；按需要接收明确的展示模型。 */\n    render(): void { /* 根据展示模型更新节点。 */ }\n}\n`;
+        if (args.viewModel || args.presenter) {
+            const core = path.relative(code, inside('assets/framework/core')).replaceAll('\\', '/');
+            const ui = path.relative(code, inside('assets/framework/ui/ui-view')).replaceAll('\\', '/');
+            const types = layout.importPath(paths.script, paths.types);
+            files[path.join(code, `${className}ViewModel.ts`)] = `import { State } from '${core}/state';
+import type { Lifetime } from '${core}/scope';
+/** 语义状态；不包含节点、显示资源或排版文本。 */
+export interface ${className}State { readonly ready: boolean; }
+/** 可供多个皮肤复用的展示逻辑；共享业务规则通过构造参数注入 Service。 */
+export class ${className}ViewModel {
+    private readonly data = new State<${className}State>({ ready: false });
+    /** View 只能读取和订阅；输入通过本类的明确方法调用。 */
+    readonly state = this.data.readonly;
+    /** @param owner 本次显示的期限；共享实例显式使用外部流程期限。 */
+    constructor(private readonly owner: Lifetime) {}
+    /** 初始取数在这里组织；异步工作使用 runTask/Actions，并检查取消后再写状态。 */
+    start(): void { this.owner.signal.throwIfAborted(); this.data.set({ ready: true }); }
+}
+`;
+            files[path.join(code, `${className}.ts`)] = `import { _decorator } from 'cc';
+import type { ViewShowContext } from '${ui}';
+import type { ${className}Params, ${className}Result } from '${types}';
+import { ${className}Binding } from './generated/${className}Binding';
+import { ${className}ViewModel, type ${className}State } from './${className}ViewModel';
+const { ccclass } = _decorator;
+/** View 负责节点和输入；ViewModel 提供语义状态及操作。 */
+@ccclass('${manifest.id}.${className}')
+export class ${className} extends ${className}Binding {
+    /** 每次显示创建独立实例；复杂资源区域使用 show.bindings.prepare。 */
+    protected onShow(show: ViewShowContext<${className}Params, ${className}Result>): void {
+        const model = new ${className}ViewModel(show.scope);
+        show.bindings.watch(model.state, state => state, state => this.render(state));
+        model.start();
+        // 输入用 show.listen 连接 model 的明确方法；一次性导航/确认通过显式交互端口注入。
+    }
+    /** 只同步更新节点。按区域选择状态，避免余额变化重建整张列表。 */
+    private render(_state: ${className}State): void { /* 使用自动绑定的节点。 */ }
+}
+`;
         }
         for (const [target, text] of Object.entries(files)) await writeScript('create-asset', target, text);
         await waitClass(`${manifest.id}.${className}`);

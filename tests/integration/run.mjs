@@ -3,6 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const groups = {
+    presentation: {
+        description: '状态绑定、首屏/清理屏障、组件准备顺序、双皮肤与缓存重开；需 workshop 示例',
+        files: ['verify-presentation.mjs'],
+    },
     ui: {
         description: '弹窗排序/真实输入、生命周期/缓存/动态组件、异常清理；需展示模块',
         files: ['verify-ui-ordering.mjs', 'verify-framework-lifecycle.mjs', 'verify-ui-cleanup.mjs'],
@@ -11,7 +15,10 @@ const groups = {
         description: '启动故障反馈与清理/重试屏障；需默认 GameRoot 与首屏',
         files: ['verify-startup-feedback.mjs'],
     },
-    components: { description: '原生 UI 组件、布局与真实输入；需展示模块', files: ['verify-ui-components.mjs'] },
+    components: {
+        description: '原生 UI 组件、布局与真实输入；需包含展示模块的 Web 构建',
+        files: ['verify-ui-components.mjs'],
+    },
     resources: {
         description: '批量资源、Prefab 池与本地化资源；需展示模块',
         files: ['verify-resources-localization.mjs'],

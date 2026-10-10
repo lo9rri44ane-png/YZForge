@@ -21,7 +21,7 @@ const ProgressSave: StorageKey<{ progress: number }> = {
         (value as { progress: number }).progress >= 0,
 };
 
-/** 任务领域服务：配置、规则、状态和存档；不引用 Page、Presenter 或 Cocos 节点。 */
+/** 任务领域服务：配置、规则、状态和存档；不引用 Page、ViewModel 或 Cocos 节点。 */
 export class TaskService {
     private progress: number;
     private failNext = false;
@@ -45,6 +45,7 @@ export class TaskService {
     /** 并行加载本模块任务表与公共表，期限由调用页面决定。 */
     async load(owner: Lifetime): Promise<readonly TasksRow[]> {
         const tables = await this.ctx.config.in(owner).loadMany({ tasks: TasksTable, economy: EconomyTable });
+        owner.signal.throwIfAborted();
         for (const row of tables.tasks.all()) tables.economy.require(row.economy);
         // 只接收配置管线校验过的规则，领取命令不接受 UI 传来的金额或完成条件。
         this.definitions = new Map(tables.tasks.all().map((row) => [row.id, row]));
@@ -77,7 +78,8 @@ export class TaskService {
             id: row.id,
             title: row.name,
             reward: row.reward,
-            detail: `训练 ${Math.min(this.progress, row.goal)} / ${row.goal} · 奖励 ${row.reward} 金币`,
+            progress: Math.min(this.progress, row.goal),
+            goal: row.goal,
             state: this.profile.hasReward(this.rewardId(row.id))
                 ? 'claimed'
                 : this.progress >= row.goal

@@ -26,6 +26,14 @@
       "duplicate": "reject",
       "className": "workshop.ClaimPopup",
       "visibility": "internal"
+    },
+    "workflow-compact-page": {
+      "visibility": "internal",
+      "prefab": "workshop/default/prefab/ui/workflow-compact-page",
+      "kind": "page",
+      "cache": "none",
+      "duplicate": "reject",
+      "className": "workshop.WorkflowCompactPage"
     }
   },
   "audio": {},

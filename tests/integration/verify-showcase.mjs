@@ -366,7 +366,7 @@ try{
             ['_bindBtnStructure', '创建模块'],
             ['_bindBtnConfig', '__config'],
             ['_bindBtnService', 'TaskService'],
-            ['_bindBtnPresenter', 'WorkflowPagePresenter'],
+            ['_bindBtnPresenter', 'WorkflowPageViewModel'],
             ['_bindBtnView', 'WorkflowPage'],
             ['_bindBtnBinding', 'lbl_title'],
             ['_bindBtnVerify', 'npm run verify'],

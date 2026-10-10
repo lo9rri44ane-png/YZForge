@@ -49,7 +49,8 @@ try {
   await until(()=>started);await wait(100);
   check(!opened&&!page().interactive,'Page returned before native images ready');
   check(page().instance.container.getComponent(cc.UIOpacity).opacity===0,'Preparing page became visible');
-  check(original.interactive&&!original.suspended,'Previous page hidden while language loads');
+  check(original.instance.node.activeInHierarchy&&original.instance.container.getComponent(cc.UIOpacity).opacity===255&&!original.suspended&&!original.show.signal.aborted,'Previous page hidden or cancelled while language loads');
+  check(!original.interactive,'Previous page accepts input during navigation preparation');
   check(!find(page().instance.node,'StaticImage').getComponent(cc.Sprite).enabled,'Unready image renderer exposed');
   release();await observed;
   check(find(page().instance.node,'StaticImage').getComponent(cc.Sprite).enabled,'Ready image remained hidden');

@@ -22,11 +22,11 @@ export class GuidePage extends GuidePageBinding {
             ],
             [
                 this.btnPresenter,
-                '④ WorkflowPagePresenter\n加载表 → 生成模型 → 打开确认弹窗\ncompleted 才提交命令 → 刷新 → 提示\n只依赖渲染 Port，不依赖节点和 Label。',
+                '④ WorkflowPageViewModel\n加载表 → 生成模型 → 打开确认弹窗\ncompleted 才提交命令 → 刷新 → 提示\n暴露只读语义状态和操作，不依赖节点和 Label。',
             ],
             [
                 this.btnView,
-                '⑤ WorkflowPage / TaskPart\nPage 绑定输入、创建 Part、同步渲染\nPart 接收模型，通过 ID 回传点击\n复杂页面配 Presenter；简单页面可直接组织交互。',
+                '⑤ WorkflowPage / TaskPart\nPage 绑定输入、创建 Part、同步渲染\nPart 接收模型，通过 ID 回传点击\n复杂页面复用 ViewModel；简单页面可使用局部状态。',
             ],
             [
                 this.btnBinding,

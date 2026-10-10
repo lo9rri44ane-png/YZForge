@@ -13,6 +13,8 @@ export interface ComponentBinding {
     __allow(owner: Scope | undefined): void;
     /** 等待本次启用的必要显示资源；界面准备期间调用，不等待持续运行的业务任务。 */
     __ready?(): Promise<void>;
+    /** 原生控件准备后，再等待业务组件在 onActivate 注册的必需状态绑定。 */
+    __prepared?(): Promise<void>;
     /** 等待旧工作及清理全部完成。 */
     __deactivate(): Promise<void>;
 }
@@ -90,6 +92,10 @@ export class ComponentHost {
         );
         owner.signal.throwIfAborted();
         for (const component of components) if (!component.__ready) component.__allow(owner);
+        await untilCancelled(
+            Promise.all(components.map((component) => component.__prepared?.() ?? Promise.resolve())),
+            owner.signal,
+        );
     }
 
     adopt(root: Node, caller: Lifetime, moduleId: string | undefined): Promise<void> {

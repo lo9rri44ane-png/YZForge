@@ -6,7 +6,7 @@
 
 | 入口                          | 可以实际操作什么                                                                                                                 |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| 正式业务流程                  | 完成训练、确认或取消领取、注入一次失败再重试、返回再进入；观察 Service / Presenter / Page / Part 分工                            |
+| 正式业务流程                  | 完成训练、确认或取消领取、注入一次失败再重试、返回再进入；观察 Service / ViewModel / Page / Part 分工                            |
 | UI 与 Part                    | Page、Popup、Overlay、Toast、Loading，参数与结果、缓存、重复打开拒绝、Part 创建和提前释放、压栈与恢复                            |
 | 资源、配置与音频              | 静态预制体引用、动态 Key、精确相对路径、默认包与 extra 分片、跨模块表、批量读取、循环播放/暂停/继续/停止、通道音量               |
 | 时间与日历                    | 应用实时日期、独立模拟时钟、日/周/月/年边界、一周后、月末锚点、绝对截止时间、后台合并补发、回拨去重、模拟服务器校时              |
@@ -40,10 +40,11 @@ node tests/integration/verify-network-guide.mjs http://127.0.0.1:7456/
 “UI 与 Part → 通用组件”展示 SafeWidget、继承原生控件的 AsyncButton/AsyncSprite/CountdownLabel、Switch 和 MarqueeLabel。可以连点提交、快速换图、按名字切换子节点、重启倒计时、切换长短文本观察自动滚动，以及模拟安全区。滚动页面可看到全部内容；换图、切换和计时等由 Inspector 事件驱动，完整接口见 [通用 UI 组件](ui-components.md)。
 
 ```sh
-node tests/integration/verify-ui-components.mjs http://127.0.0.1:7456/
+node tests/integration/serve-build.mjs build/web_local-dev-debug
+npm run test:integration -- components --url <上一步输出的本机地址>
 ```
 
-脚本使用当前 MCP 和独立隐藏窗口，验证重绑竞态、禁用/关闭清理、真实资源持有、Switch、滚动文本、倒计时校时与前台恢复，以及安全区百分比、缩放、嵌套和横竖屏。结束恢复设备和方向选项并关闭自建窗口。
+先构建当前项目的 Web 版本。脚本使用当前 MCP 和独立隐藏窗口，验证重绑竞态、禁用/关闭清理、真实资源持有、Switch、滚动文本、倒计时校时与前台恢复，以及安全区百分比、缩放、嵌套和横竖屏。此组还检查发行产物不会使用编辑器模拟边距，因此需要 Web 构建地址。结束恢复设备和方向选项并关闭自建窗口。
 
 ## 编辑器工作流
 
@@ -53,7 +54,8 @@ node tests/integration/verify-ui-components.mjs http://127.0.0.1:7456/
 
 ## 可控失败与自动验证
 
-- `npm run test:showcase`：业务规则、写入失败一致性、领取去重、Presenter 确认/取消、跨模块状态刷新、订阅失败与结束后的解绑、模拟时间回收、存档故障。
+- `npm run test:showcase`：业务规则、写入失败一致性、领取去重、ViewModel 确认/取消、跨模块状态刷新、订阅失败与结束后的解绑、模拟时间回收、存档故障。
+- `npm run test:integration -- presentation --url http://127.0.0.1:7456/`：状态绑定、首屏准备、取消清理屏障、组件激活顺序、双皮肤真实输入和缓存重开。`--list` 列出全部功能组及前置条件。
 - `tests/integration/verify-showcase.mjs`：在真实 Cocos 运行时检查任务流程、导航、UI 结果、缓存、分包、资源持有、失败恢复及多屏适配，包含慢加载下的真实鼠标输入。自动调用 `verify-return-navigation.mjs` 逐帧检查返回不出现空白或双页重叠，并覆盖多语言就绪、重复返回、准备失败、慢清理、清理错误、所有者取消和关机中断。
 - `tests/integration/verify-panel.mjs`：真实 Creator 工作台的创建预览、页面公开范围、草稿、设置与生成恢复。
 - `npm run verify`：通用框架的静态检查、生成一致性与回归测试；与可删除的示例业务测试分开。

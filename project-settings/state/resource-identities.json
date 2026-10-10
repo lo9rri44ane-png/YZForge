@@ -259,6 +259,12 @@
       "active": true,
       "source": "assets/game/modules/showcase/bundles/default/dynamic/icons/beta/token.png"
     },
+    "ca0fbd32-ca28-4595-972a-006acefc3fef": {
+      "id": "workshop/default/prefab/ui/workflow-compact-page",
+      "type": "Prefab",
+      "active": true,
+      "source": "assets/game/modules/workshop/bundles/default/dynamic/ui/WorkflowCompactPage.prefab"
+    },
     "d3246fa4-a314-4e26-b918-74bdf89848c1": {
       "id": "showcase/default-zh-cn/image/images/greeting",
       "type": "ImageAsset",

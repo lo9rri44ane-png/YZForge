@@ -12,22 +12,22 @@
 | 模块装配   | [WorkshopModule.ts](../assets/game/modules/workshop/code/WorkshopModule.ts)                                      | 注入声明的 Profile API，创建 TaskService      |
 | 业务规则   | [TaskService.ts](../assets/game/modules/workshop/code/services/TaskService.ts)                                   | 训练进度、配置查询、领取条件、业务事件        |
 | 账号状态   | [WalletService.ts](../assets/game/modules/profile/code/services/WalletService.ts)                                | 余额、领取去重记录、存档和订阅                |
-| 展示流程   | [WorkflowPagePresenter.ts](../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPagePresenter.ts)       | 取数、确认、命令、反馈；定义最小渲染 Port     |
+| 展示流程   | [WorkflowPageViewModel.ts](../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPageViewModel.ts)       | 取数、确认、命令、反馈；暴露只读语义状态      |
 | 页面显示   | [WorkflowPage.ts](../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPage.ts)                         | 按钮绑定、动态 Part 创建、同步更新节点        |
 | 可复用部件 | [TaskPart.ts](../assets/game/modules/workshop/code/components/task-part/TaskPart.ts)                             | 接收卡片模型，通过任务 ID 回传点击            |
 | 自动绑定   | [WorkflowPageBinding.ts](../assets/game/modules/workshop/code/ui/workflow-page/generated/WorkflowPageBinding.ts) | 节点引用和类型化 getter，由工作台生成         |
 
-`game/app` 负责启动接入和应用装配，`start-game.ts` 只选择首屏及需要启动持有的模块。业务代码都留在所属模块：Service 管规则和状态，Page / Part 管显示，Presenter 按需协调复杂交互。跨模块使用公开合同和 API；需要多步业务协调时，普通函数或类也放在发起业务的模块内。
+`game/app` 负责启动接入和应用装配，`start-game.ts` 只选择首屏及需要启动持有的模块。业务代码都留在所属模块：Service 管规则和状态，Page / Part 管显示，ViewModel 按需协调复杂交互。跨模块使用公开合同和 API；需要多步业务协调时，普通函数或类也放在发起业务的模块内。
 
 ```mermaid
 sequenceDiagram
     participant P as Page / TaskPart
-    participant C as Presenter
+    participant C as ViewModel
     participant U as UIManager / ClaimPopup
     participant S as TaskService
     participant W as Profile API / WalletService
     P->>C: 点击领取，传入任务 ID
-    C->>U: show.ui.open(ClaimPopup, 参数, { owner: task.scope })
+    C->>U: effects.confirm(任务数据, task.scope)
     U-->>C: completed / cancelled / failed
     alt 确认领取
         C->>S: claim(任务 ID)
@@ -36,18 +36,18 @@ sequenceDiagram
         W->>W: 一次保存余额和领取记录
         W-->>S: 本次发放 / 已经领取
         S-->>C: 返回结果，发布 WorkshopChanged
-        C->>P: render(只读模型, 摘要)
+        C-->>P: 提交状态 → bindings 按区域渲染
     else 取消
-        C->>P: 显示取消，业务状态不变
+        C-->>P: 提交取消反馈，业务状态不变
     end
 ```
 
-**不要求每个简单页面都有 Presenter。** 只有打开提示、显示时间等局部操作时，页面直接使用上下文更清楚。涉及多步交互、多个领域服务、复杂状态和单元测试时，引入 Presenter；不要给 Service 传入 Label、Node 或页面实例。
+**不要求每个简单页面都有 ViewModel。** 只有打开提示、显示时间等局部操作时，页面直接使用上下文更清楚。涉及多步交互、多个领域服务、复杂状态和单元测试时，引入 ViewModel；不要给 Service 传入 Label、Node 或页面实例。
 
 ## 2. 在工作台创建内容
 
 1. 创建自己的模块，选择代码交付方式和默认资源包。示例 `workshop` 使用按需代码，`profile` 使用启动代码，`common` 仅有配置和资源。
-2. 创建 Page，复杂页面勾选 Presenter；创建 Part 和 Service。首屏或需要跨模块打开的界面勾选“公开界面合同”，其余默认内部。先检查全部文件预览，脚本和预制体后缀自动补齐。
+2. 创建 Page，复杂页面勾选 ViewModel；创建 Part 和 Service。首屏或需要跨模块打开的界面勾选“公开界面合同”，其余默认内部。先检查全部文件预览，脚本和预制体后缀自动补齐。
 3. 在模块设置声明业务依赖。示例声明 `profile`，生成的依赖合同让模块工厂获得完整类型。
 4. 通过生成的公开合同访问其他模块；不导入其他模块 `code` 里的具体服务或组件。
 
@@ -81,7 +81,7 @@ const samples = await show.config.load(SamplesTable, { bundle: ShowcaseBundles.e
 
 `WalletService.claimReward()` 用稳定的 `workshop/task/<id>` 去重，并把余额和领取记录放在同一次存档写入中。写入失败不会改变内存状态；重试不会重复增加余额。这是本地示例，联网项目应由服务端权威处理经济结算，不能把客户端记录作为防作弊依据。
 
-`WorkflowPagePresenter` 每次展示重新创建，负责加载、生成展示模型、等待确认、调用命令和渲染。它只依赖 `WorkflowPagePort`，业务测试不需要启动 Cocos。模块状态持续时间由 Service 的模块期限决定，不由 Presenter 的字段决定。
+`WorkflowPageViewModel` 每次展示重新创建，负责加载、选择、等待确认、调用命令和提交语义状态。它只依赖 Service、Lifetime 和明确的确认端口，业务测试不需要启动 Cocos。模块状态持续时间由 Service 的模块期限决定，不由 ViewModel 的字段决定。`WorkflowCompactPage` 直接复用同一实现，以紧凑列表显示相同业务。
 
 页面显示的数据来自多个模块时，订阅也要覆盖这些来源。`TaskService.subscribe()` 立即通知当前状态，并同时订阅任务事件和 Profile 状态；其他模块改变余额或领取记录，当前任务页也会更新。主动取消或结束 show 会解绑两种来源，订阅初始化失败也会回收已登记的监听。
 
@@ -116,11 +116,53 @@ const samples = await show.config.load(SamplesTable, { bundle: ShowcaseBundles.e
 
 调试数据显示通过 `this.ctx.diagnostics.snapshot()` / `.module(id)` 读取，只返回只读摘要，不负责导航，不启动业务模块。
 
-## 7. 验证与发布
+## 7. 状态、准备、取消与换皮
+
+静态确认框直接使用参数与 show.finish；只有几个动态字段时，在 onShow 内创建局部 State 即可。复杂界面把相同的 State/方法接口放入普通 ViewModel 类，工作台的“增加 ViewModel”生成这种结构。不需要继承基类，也不需要额外 Presenter、Controller 或字符串命令总线。
+
+```ts
+const data = new State({ selectedId: 0, coins: 10 });
+show.bindings.watch(data.readonly, s => s.coins, coins => {
+    this.lblCoins.string = String(coins);
+});
+show.listen(this.btnSelect.node, Button.EventType.CLICK, () => {
+    data.update(s => ({ ...s, selectedId: 1 }));
+});
+```
+
+复杂页先 await model.start() 获取初始业务数据，再按区域绑定。selector 默认用 Object.is 比较，修改无关字段时复用旧分支；多字段 selector 可提供 equals。大量列表用 VirtualList，更新条目状态不要整表重新 setItems。每帧移动与动画保留在 onTick 中，不把高频节点坐标放入不可变状态。
+
+```ts
+show.bindings.prepare(model.state, s => s.itemIds, {
+    label: 'items',
+    prepare: async (ids, stage) => {
+        // 候选资源归 stage.scope，成功显示后框架继续持有它。
+        const assets = show.assets.in(stage.scope);
+        return await prepareItems(ids, assets, stage.signal);
+    },
+    render: (next, _ids, previous) => {
+        // 同步隐藏旧内容、显示新内容，返回后旧资源才会回收。
+        replaceItems(next, previous);
+    },
+});
+```
+
+onShow 返回后框架自动等待必需绑定的最新代次，组件准备导致状态改变时也会重新核对。初始必需内容失败会使打开失败并保留原页；可选区域用 required: false 并自行显示占位。后续 prepare 失败可用 onError 显示区域反馈并保留旧内容，再调用返回绑定的 refresh() 重试；选择器和 render 错误属于界面故障。
+
+订阅同步立即推送、重入按顺序排队、所有者取消时同步解绑。错误订阅被移除并上报，不能让 Service 已完成的写入变成业务失败。prepare 必须响应 signal 或最终结束；取消只阻止回写，不提前释放仍被使用的资源。不要在 prepare 中等待自己的 dispose，也不要用 Actions 的短期 Scope 持有准备完还要显示的节点。
+
+确认、导航、音效是一次性操作，通过明确的效果端口或调用执行，不能用“弹窗待打开”状态让订阅者自行消费。确认保留 completed/cancelled/failed/cleanupPending，失败和取消都不提交领取。exclusive 在工作及清理期间持续防重入；领域 Service 仍需处理跨界面的幂等性。
+
+两个皮肤默认各自创建 ViewModel，共享 Service，选择/加载/反馈互不污染。确实共享一个 ViewModel 时，由外部业务流程持有它并提供交互端口，每个 View 独立绑定；关闭其中一个 View 不应关闭业务流程或另一份资源。
+
+单纯换图片/字体可用同一个 View。节点结构不同时使用各自 View/Prefab；示例卡片页可进入紧凑页，业务与存档不复制。同一逻辑 ViewKey 的皮肤在 App 创建前替换对应 ViewDefinition.prefab，参数与结果合同保持一致；同时展示两套布局则登记不同 Key，缓存自然隔离。此版本不增加运行中全局热换肤机制。
+
+## 8. 验证与发布
 
 ```powershell
 npm run verify
 npm run test:showcase
+npm run test:integration -- presentation ui --url http://localhost:7456/
 ```
 
 构建前除 TypeScript 和生成一致性检查外，还检查 Creator 是否已注册每个 UI 的组件类；有缺失导入时先修复、刷新脚本并等编辑器完成编译，不能仅凭 tsc 通过就发布。
