@@ -10,6 +10,14 @@ import { WorkshopChanged } from '../../contracts/workflow';
 import { invariant } from '../../../../../framework/core/errors';
 import type { BadgeSource } from '../../../../../framework/badges';
 import { TaskBadges, taskBadge } from '../../contracts/badges';
+import { State, derive, type ReadonlyState } from '../../../../../framework/core/state';
+
+/** 跨界面共享的事实，选择项、按钮忙碌和反馈不进入领域状态。 */
+export interface TaskFacts {
+    readonly progress: number;
+    readonly coins: number;
+    readonly claims: readonly string[];
+}
 
 const ProgressSave: StorageKey<{ progress: number }> = {
     id: 'workshop.progress',
@@ -23,7 +31,9 @@ const ProgressSave: StorageKey<{ progress: number }> = {
 
 /** 任务领域服务：配置、规则、状态和存档；不引用 Page、ViewModel 或 Cocos 节点。 */
 export class TaskService {
-    private progress: number;
+    private readonly progress: State<number>;
+    /** 与其他 Service、ViewModel 使用同一只读状态协议。 */
+    readonly state: ReadonlyState<TaskFacts>;
     private failNext = false;
     private definitions = new Map<number, TasksRow>();
     private readonly badges = new Map<number, BadgeSource>();
@@ -38,9 +48,13 @@ export class TaskService {
             'DEMO_PROGRESS_INVALID',
             '训练存档需要恢复',
         );
-        this.progress = saved.value?.progress ?? 0;
+        this.progress = new State(saved.value?.progress ?? 0);
+        this.state = derive(ctx.scope, [this.progress.readonly, profile.state], (progress, wallet) => ({
+            progress,
+            ...wallet,
+        }));
         ctx.badges.group(TaskBadges, 'sum', ctx.scope);
-        profile.subscribe(() => this.updateBadges(), ctx.scope);
+        this.state.subscribe(ctx.scope, () => this.updateBadges());
     }
     /** 并行加载本模块任务表与公共表，期限由调用页面决定。 */
     async load(owner: Lifetime): Promise<readonly TasksRow[]> {
@@ -65,24 +79,24 @@ export class TaskService {
     /** 完成训练：保存成功后更新状态并发出业务事件。 */
     train(): void {
         this.ctx.scope.signal.throwIfAborted();
-        const next = this.progress + 1;
+        const next = this.progress.readonly.value + 1;
         invariant(Number.isSafeInteger(next), 'DEMO_PROGRESS_LIMIT', '训练次数超出范围');
         this.ctx.storage.set(ProgressSave, { progress: next });
-        this.progress = next;
+        this.progress.set(next);
         this.publish('完成训练');
     }
     /** 将原始配置和玩家状态转换成可渲染的数据；只读查询不会改变业务。 */
-    cards(rows: readonly TasksRow[]): readonly TaskCardModel[] {
+    cards(rows: readonly TasksRow[], facts = this.state.value): readonly TaskCardModel[] {
         this.ctx.scope.signal.throwIfAborted();
         return rows.map((row) => ({
             id: row.id,
             title: row.name,
             reward: row.reward,
-            progress: Math.min(this.progress, row.goal),
+            progress: Math.min(facts.progress, row.goal),
             goal: row.goal,
-            state: this.profile.hasReward(this.rewardId(row.id))
+            state: facts.claims.includes(this.rewardId(row.id))
                 ? 'claimed'
-                : this.progress >= row.goal
+                : facts.progress >= row.goal
                   ? 'ready'
                   : 'locked',
         }));
@@ -92,7 +106,7 @@ export class TaskService {
         this.ctx.scope.signal.throwIfAborted();
         const row = this.definitions.get(id);
         invariant(row, 'DEMO_TASK_UNKNOWN', '任务不存在或尚未加载配置');
-        invariant(this.progress >= row.goal, 'DEMO_TASK_LOCKED', '请先完成所需训练次数');
+        invariant(this.progress.readonly.value >= row.goal, 'DEMO_TASK_LOCKED', '请先完成所需训练次数');
         if (this.failNext) {
             this.failNext = false;
             throw Error('模拟请求失败：状态未改变，请再次领取');
@@ -105,41 +119,13 @@ export class TaskService {
     simulateFailure(): void {
         this.failNext = true;
     }
-    /** 界面需要的状态摘要，余额来自另一个模块的公开 API。 */
-    snapshot() {
-        return { progress: this.progress, coins: this.profile.snapshot().coins };
-    }
-    /**
-     * 立即通知当前状态，并同时观察训练和账号余额/领取记录的变化。
-     * owner 结束或调用返回的取消函数时解绑两种来源，不把账号变化伪装成任务事件。
-     */
-    subscribe(callback: () => void, owner: Lifetime): () => void {
-        this.ctx.scope.signal.throwIfAborted();
-        let active = true;
-        const notify = () => {
-            if (active && !owner.signal.aborted) callback();
-        };
-        const offTasks = this.ctx.events.on(WorkshopChanged, notify, owner);
-        try {
-            const offProfile = this.profile.subscribe(notify, owner);
-            return () => {
-                active = false;
-                offTasks();
-                offProfile();
-            };
-        } catch (error) {
-            // 账号订阅或首次回调失败时，不能留下半份订阅。
-            active = false;
-            offTasks();
-            throw error;
-        }
-    }
     private rewardId(id: number): string {
         return `workshop/task/${id}`;
     }
     private publish(reason: string): void {
         this.updateBadges();
-        this.ctx.events.emit(WorkshopChanged, { reason, ...this.snapshot() });
+        const { progress, coins } = this.state.value;
+        this.ctx.events.emit(WorkshopChanged, { reason, progress, coins });
     }
     private updateBadges(): void {
         if (this.ctx.scope.signal.aborted) return;
@@ -147,7 +133,11 @@ export class TaskService {
             for (const row of this.definitions.values())
                 this.badges
                     .get(row.id)
-                    ?.set(Number(this.progress >= row.goal && !this.profile.hasReward(this.rewardId(row.id))));
+                    ?.set(
+                        Number(
+                            this.progress.readonly.value >= row.goal && !this.profile.hasReward(this.rewardId(row.id)),
+                        ),
+                    );
         });
     }
 }

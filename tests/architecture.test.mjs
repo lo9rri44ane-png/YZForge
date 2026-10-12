@@ -122,6 +122,25 @@ test('值依赖循环被拒绝，纯类型循环不制造运行时循环', async
     await architectureCheck(f.root, []);
 });
 
+test('ViewModel cannot reach nodes or UI protocols through type imports or local helpers', async (t) => {
+    const f = await fixture(t),
+        module = { ...f.module, directory: f.directory };
+    await f.put(
+        'assets/game/modules/demo/code/HomeViewModel.ts',
+        "import type { Port } from './helper'; export type Model=Port;",
+    );
+    await f.put('assets/game/modules/demo/code/helper.ts', "export type Port=import('cc').Node;");
+    await assert.rejects(architectureCheck(f.root, [module]), /ViewModel 不能依赖/);
+    await f.put('assets/framework/ui/view-session.ts', 'export interface Session {}');
+    await f.put(
+        'assets/game/modules/demo/code/helper.ts',
+        "export type Port=import('../../../../framework/ui/view-session').Session;",
+    );
+    await assert.rejects(architectureCheck(f.root, [module]), /ViewModel 不能依赖/);
+    await f.put('assets/game/modules/demo/code/helper.ts', 'export interface Port { confirm():Promise<boolean> }');
+    await architectureCheck(f.root, [module]);
+});
+
 test('组件通过能力接口消费服务，纯类型引用也不能重新耦合具体管理器', async (t) => {
     const f = await fixture(t);
     await f.put('assets/framework/assets/asset-manager.ts', 'export class Assets {}');

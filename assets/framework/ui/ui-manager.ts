@@ -11,7 +11,8 @@ import { ModuleContext, ModuleManager } from '../modules/module-manager';
 import { TimeService } from '../time/time-service';
 import { UIView, ViewShowContext } from './ui-view';
 import { Actions } from '../core/actions';
-import { StateBindings } from '../core/state-bindings';
+import { ViewBindings } from './view-bindings';
+import { ViewSession } from './view-session';
 import { ScopedLocalization } from './localization/localized-ui';
 
 /** 框架支持的完整界面类别；Part 不属于 UI 页面栈。 */
@@ -190,6 +191,7 @@ type RecordView = {
     definition: ViewDefinition;
     owner: Lifetime;
     operation: Scope;
+    session?: ViewSession<unknown>;
     params: unknown;
     instance?: Instance;
     loadingScope?: Scope;
@@ -395,6 +397,7 @@ export class UIManager {
                 await this.modules.use({ id: definition.module }, operation);
             if (record.termination) throw new OperationCancelled();
             const context = this.modules.context(definition.module);
+            record.session = new ViewSession(operation.child('session'), record.params, context);
             let instance = this.cache.get(key.id);
             if (instance) {
                 this.cache.delete(key.id);
@@ -517,8 +520,9 @@ export class UIManager {
         };
         const context: ViewShowContext<unknown, unknown> = Object.freeze({
             ...taskContext(scope, isCurrent),
+            session: record.session!,
             actions: new Actions(scope.lifetime, isCurrent),
-            bindings: new StateBindings(scope.lifetime, isCurrent, fault),
+            bindings: new ViewBindings(scope.lifetime, isCurrent, fault, () => record.interactive),
             assets: scopedAssets,
             i18n: new ScopedLocalization(instance.context.i18n, scopedAssets, scope.lifetime, isCurrent),
             config: instance.context.config.in(scope),
@@ -656,6 +660,7 @@ export class UIManager {
                 });
                 if (record.instance) {
                     await this.hide(record, record.termination!.status);
+                    await record.session?.__close();
                     const instance = record.instance;
                     if (
                         record.definition.cache === 'keep-one' &&
@@ -677,6 +682,11 @@ export class UIManager {
                         this.report(cleanup);
                     }
             } finally {
+                try {
+                    await record.session?.__close();
+                } catch (error) {
+                    record.termination = { status: 'failed', error, cleanupPending: false };
+                }
                 record.detach();
                 record.unown();
                 this.records.delete(record.id);

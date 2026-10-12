@@ -2,6 +2,7 @@ import { OperationCancelled, type ErrorReporter, reportError } from './errors';
 import { untilCancelled } from './cancellation';
 import { runTask, type Lifetime, type Scope, type TaskContext } from './scope';
 import { type ReadonlyState, type Snapshot, reportObserverError, synchronousStateEffect } from './state';
+import { claimProperties } from './property-lease';
 
 /** 一块显示区域的准备屏障和控制入口。资源归绑定所有，不归 ViewModel 或短期 Actions 所有。 */
 export interface StateBinding {
@@ -15,6 +16,8 @@ export interface StateBinding {
 
 /** 同步绑定的选择规则。选择值使用 Object.is 比较；对象分支应复用不可变快照。 */
 export interface WatchOptions<T> {
+    /** 声明这块渲染独占的属性；重叠绑定明确报错，dispose/owner 结束同步归还。 */
+    readonly writes?: readonly (readonly [object, PropertyKey])[];
     /** 用于诊断的区域名称。 */
     readonly label?: string;
     /** 显式比较选中的值，避免无关状态改变导致重复渲染。 */
@@ -46,10 +49,27 @@ export class StateBindings {
 
     /** @param fault 渲染错误的宿主故障处理器，与业务命令失败分开。 */
     constructor(
-        private readonly owner: Lifetime,
-        private readonly current: () => boolean = () => true,
-        private readonly fault: ErrorReporter = reportError,
+        protected readonly owner: Lifetime,
+        protected readonly current: () => boolean = () => true,
+        protected readonly fault: ErrorReporter = reportError,
     ) {}
+
+    /** 单向属性绑定；选择值未变化不写入，不能再为同一属性注册其他受管写入者。 */
+    property<O extends object, K extends keyof O, S>(
+        target: O,
+        key: K,
+        source: ReadonlyState<S>,
+        select: (state: Snapshot<S>) => O[K],
+    ): StateBinding {
+        return this.watch(
+            source,
+            select,
+            (value) => {
+                target[key] = value;
+            },
+            { writes: [[target, key]], label: String(key) },
+        );
+    }
 
     /** 同步首绘和后续局部更新；不要返回 Promise，需要资源准备时使用 prepare。 */
     watch<S, T>(
@@ -90,6 +110,17 @@ export class StateBindings {
         options: Omit<PrepareBinding<T, P>, 'prepare'> & { prepare?: PrepareBinding<T, P>['prepare'] },
     ): StateBinding {
         const owner = this.owner.child(`binding:${options.label ?? 'state'}`);
+        const releases: (() => void)[] = [];
+        try {
+            for (const [target, key] of options.writes ?? []) releases.push(claimProperties(target, [key]));
+        } catch (error) {
+            for (const release of releases) release();
+            void owner.close().catch(this.fault);
+            throw error;
+        }
+        owner.signal.onAbort(() => {
+            for (const release of releases) release();
+        });
         let painted = false;
         let latest: Promise<void> = Promise.resolve();
         let selected: T;
@@ -116,6 +147,16 @@ export class StateBindings {
                 .drainCancelledTasks()
                 .then(() => stage.scope.close())
                 .catch((error) => reportObserverError(this.fault, error));
+        };
+        const rejectSource = (error: unknown) => {
+            if (pending) {
+                retire(pending);
+                pending = undefined;
+            }
+            this.revision++;
+            latest = Promise.reject(error);
+            void latest.catch(() => {});
+            fail(error, false);
         };
         const commit = (stage: Stage<P>, prepared: P, value: T) => {
             if (!active() || pending !== stage || stage.scope.signal.aborted) throw new OperationCancelled();
@@ -148,14 +189,7 @@ export class StateBindings {
                 value = select(state);
                 if (!force && selectedOnce && (options.equals ?? Object.is)(selected, value)) return;
             } catch (error) {
-                if (pending) {
-                    retire(pending);
-                    pending = undefined;
-                }
-                this.revision++;
-                latest = Promise.reject(error);
-                void latest.catch(() => {});
-                fail(error, false);
+                rejectSource(error);
                 return;
             }
             selected = value;
@@ -212,11 +246,7 @@ export class StateBindings {
             );
         };
         try {
-            source.subscribe(
-                owner.lifetime,
-                (state) => update(state),
-                (error) => fail(error, false),
-            );
+            source.subscribe(owner.lifetime, (state) => update(state), rejectSource);
         } catch (error) {
             void owner.close().catch((cause) => reportObserverError(this.fault, cause));
             throw error;

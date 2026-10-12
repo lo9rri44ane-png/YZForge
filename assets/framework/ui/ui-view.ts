@@ -10,8 +10,9 @@ import { invariant } from '../core/errors';
 import { assertLifecycle, synchronous } from '../components/lifecycle';
 import { Lifetime, TaskContext } from '../core/scope';
 import type { Actions } from '../core/actions';
-import type { StateBindings } from '../core/state-bindings';
+import type { ViewBindings } from './view-bindings';
 import type { ViewUI } from './ui-manager';
+import type { ViewSession } from './view-session';
 const { ccclass } = _decorator;
 /**
  * UI 实例创建上下文。同一缓存实例可经历多次显示，instance.scope 通常长于 show.scope。
@@ -32,8 +33,10 @@ type ReadonlyParams<P> = P extends object ? Readonly<P> : P;
  * 异步任务应捕获这一次 show，不要在完成时再读取另一轮显示的上下文。
  */
 export interface ViewShowContext<Params, Result> extends TaskContext {
+    /** 本次打开的模型会话；挂起后返回仍为同一份，缓存节点重开则创建新会话。 */
+    readonly session: ViewSession<Params>;
     /** 本次显示的状态订阅和分区渲染；onShow 返回后自动等待必需绑定首绘。 */
-    readonly bindings: StateBindings;
+    readonly bindings: ViewBindings;
     /** 本次显示的语言目录与 UI 绑定，隐藏、挂起或关闭时自动结束。 */
     readonly i18n: ScopedLocalization;
     /** 当前显示的 UI 入口：局部弹窗跟随 show，页面导航继承外部会话；旧显示不能再次使用。 */

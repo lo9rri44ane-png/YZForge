@@ -37,6 +37,7 @@ test('异步按钮覆盖业务执行和异步清理的整个忙碌期', async ()
     assert.deepEqual(changes, [true]);
     cleanup.resolve();
     assert.equal(await pressing, true);
+    await flush();
     assert.deepEqual(changes, [true, false]);
     await owner.close();
 });
@@ -60,6 +61,7 @@ test('异步按钮失败后恢复；宿主取消阻止旧提交并等待任务�
         () => {},
     );
     await assert.rejects(button.press(), (error) => error === failure);
+    await flush();
     const pending = button.press();
     const rejection = assert.rejects(pending, { code: 'OPERATION_CANCELLED' });
     await flush();

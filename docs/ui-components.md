@@ -48,6 +48,8 @@ await button.run(async task => {
 
 在组件启用后的事件中调用。忙碌、禁用、框架尚未允许当前页面工作或旧停用尚未排空时返回 false；成功返回 true，业务失败拒绝 Promise。busyVisual 是可选提示子节点。禁用/销毁同步取消，迟到结果不能通过 task.commit 回写。
 
+run / press 尽早交付业务结果，实际清理完成前继续保持忙碌。显式 bind 的句柄提供 `completed`，可独立等待最近一次点击的清理；清理错误单独报告，不覆盖业务错误。绑定拥有 interactable 和 busyVisual.active，不能再为这些属性注册其他受管写入。模型已有 Command 时，使用原生 Button 配合 `show.bindings.command`，让多个按钮共享该操作的状态。
+
 ## AsyncSprite：保留原生 Sprite，用一行换资源
 
 Inspector 的 source 填当前模块逻辑资源名即可自动加载，留空保留原生静态图；placeholder 和 failure 分别指定加载及失败图。
@@ -139,6 +141,7 @@ const click = this.btnSubmit.getComponent(AsyncButton)!.bind(item.scope, async t
 });
 click.setInteractable(true);
 await click.press();
+await click.completed; // 需要确保物理清理完成时另行等待。
 
 this.lblCountdown.getComponent(CountdownLabel)!.bind(item.scope, this.ctx.time, {
     deadlineMs: offer.endsAtMs,

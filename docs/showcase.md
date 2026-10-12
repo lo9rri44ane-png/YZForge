@@ -54,7 +54,7 @@ npm run test:integration -- components --url <上一步输出的本机地址>
 
 ## 可控失败与自动验证
 
-- `npm run test:showcase`：业务规则、写入失败一致性、领取去重、ViewModel 确认/取消、跨模块状态刷新、订阅失败与结束后的解绑、模拟时间回收、存档故障。
+- `npm run test:showcase`：业务规则、写入失败一致性、领取去重、ViewModel 确认/取消、调用参数捕获、清理期间故障反馈、显示替换与会话保留、跨模块状态刷新、订阅失败与结束后的解绑、模拟时间回收、存档故障。
 - `npm run test:integration -- presentation --url http://127.0.0.1:7456/`：状态绑定、首屏准备、取消清理屏障、组件激活顺序、双皮肤真实输入和缓存重开。`--list` 列出全部功能组及前置条件。
 - `tests/integration/verify-showcase.mjs`：在真实 Cocos 运行时检查任务流程、导航、UI 结果、缓存、分包、资源持有、失败恢复及多屏适配，包含慢加载下的真实鼠标输入。自动调用 `verify-return-navigation.mjs` 逐帧检查返回不出现空白或双页重叠，并覆盖多语言就绪、重复返回、准备失败、慢清理、清理错误、所有者取消和关机中断。
 - `tests/integration/verify-panel.mjs`：真实 Creator 工作台的创建预览、页面公开范围、草稿、设置与生成恢复。

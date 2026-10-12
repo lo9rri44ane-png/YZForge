@@ -2,7 +2,7 @@
 
 本指南对应当前实现。源码中的中文 TSDoc 会显示在 VS Code 鼠标悬停和参数提示中；输入 `(` 后按 `Ctrl+Shift+Space` 可查看参数说明。生成文件的注释来自生成器，配置字段说明来自 XLSX 第 4 行，请修改源文件后重新生成。
 
-状态驱动界面使用 `core/state` 的 `State` / `ReadonlyState` 与 `show.bindings` / `activation.bindings`。同步区域用 `watch`，需要异步显示资源用 `prepare`；语义状态、一次性效果、首屏屏障及多皮肤约定见[正式开发工作流](development-workflow.md#7-状态准备取消与换皮)和[架构](architecture.md#界面状态与渲染约定)。ViewModel 是普通业务类，不需要额外框架基类。
+状态驱动界面使用 `core/state` 的 `State` / `ReadonlyState` / `derive` / `batch` 与 `show.bindings` / `activation.bindings`。同步区域用 `watch`，需要异步显示资源用 `prepare`；语义状态、一次性效果、首屏屏障及多皮肤约定见[正式开发工作流](development-workflow.md#7-状态准备取消与换皮)和[架构](architecture.md#界面状态与渲染约定)。ViewModel 是普通业务类，由 `show.session.use(factory)` 在页面会话内复用；异步操作用 `core/command` 的 `Command`，View 用 `show.bindings.text/property/command` 连接。返回页面更新 show，但保留 session；真正关闭后重开得到新 session。
 
 ## 先选对上下文和使用期限
 

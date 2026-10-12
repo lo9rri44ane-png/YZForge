@@ -102,6 +102,13 @@ const serialized=cce.Utils.serialize(prefab);return {rootId,content:typeof seria
     assert.match(modelSource, /readonly state = this\.data\.readonly/);
     assert.doesNotMatch(modelSource, /from ['"]cc['"]|ViewShowContext|render\(/);
     assert.match(viewSource, /show\.bindings\.watch\(\s*model\.state/);
+    assert.match(viewSource, /show\.session\.use\(createRewardPopupModel\)/);
+    const modelFactory = await readFile(
+        resolve(root, 'assets/game/modules', module, 'code/ui/reward-popup/RewardPopup.model.ts'),
+        'utf8',
+    );
+    assert.match(modelFactory, /ViewModelFactory<RewardPopupViewModel, RewardPopupParams>/);
+    assert.match(modelFactory, /new RewardPopupViewModel\(scope\)/);
     await create({ kind: 'table', id: 'entries', module, bundle: 'default' });
     console.log('PASS: Part binding is serialized without dragging; Popup/ViewModel and XLSX outputs are generated');
     const workbookSource = 'config-source/' + module + '/entries.xlsx';
@@ -118,6 +125,8 @@ const serialized=cce.Utils.serialize(prefab);return {rootId,content:typeof seria
                 throw error;
             }
         });
+        // 文件删除早于整轮 AssetDB 刷新完成，恢复输入前等待自动生成真正空闲。
+        await until(async () => (await state()).autoStatus.state === 'ready');
     } finally {
         workbook = await readWorkbook(root, workbookSource);
         await writeWorkbookConfig(root, workbookSource, { ...workbook.config, enabled: true }, workbook.hash);

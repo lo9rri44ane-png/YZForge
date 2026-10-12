@@ -12,7 +12,7 @@
 | 模块装配   | [WorkshopModule.ts](../assets/game/modules/workshop/code/WorkshopModule.ts)                                      | 注入声明的 Profile API，创建 TaskService      |
 | 业务规则   | [TaskService.ts](../assets/game/modules/workshop/code/services/TaskService.ts)                                   | 训练进度、配置查询、领取条件、业务事件        |
 | 账号状态   | [WalletService.ts](../assets/game/modules/profile/code/services/WalletService.ts)                                | 余额、领取去重记录、存档和订阅                |
-| 展示流程   | [WorkflowPageViewModel.ts](../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPageViewModel.ts)       | 取数、确认、命令、反馈；暴露只读语义状态      |
+| 展示流程   | [WorkflowPageViewModel.ts](../assets/game/modules/workshop/code/presentation/WorkflowPageViewModel.ts)           | 取数、确认、命令、反馈；暴露只读语义状态      |
 | 页面显示   | [WorkflowPage.ts](../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPage.ts)                         | 按钮绑定、动态 Part 创建、同步更新节点        |
 | 可复用部件 | [TaskPart.ts](../assets/game/modules/workshop/code/components/task-part/TaskPart.ts)                             | 接收卡片模型，通过任务 ID 回传点击            |
 | 自动绑定   | [WorkflowPageBinding.ts](../assets/game/modules/workshop/code/ui/workflow-page/generated/WorkflowPageBinding.ts) | 节点引用和类型化 getter，由工作台生成         |
@@ -81,9 +81,9 @@ const samples = await show.config.load(SamplesTable, { bundle: ShowcaseBundles.e
 
 `WalletService.claimReward()` 用稳定的 `workshop/task/<id>` 去重，并把余额和领取记录放在同一次存档写入中。写入失败不会改变内存状态；重试不会重复增加余额。这是本地示例，联网项目应由服务端权威处理经济结算，不能把客户端记录作为防作弊依据。
 
-`WorkflowPageViewModel` 每次展示重新创建，负责加载、选择、等待确认、调用命令和提交语义状态。它只依赖 Service、Lifetime 和明确的确认端口，业务测试不需要启动 Cocos。模块状态持续时间由 Service 的模块期限决定，不由 ViewModel 的字段决定。`WorkflowCompactPage` 直接复用同一实现，以紧凑列表显示相同业务。
+`WorkflowPageViewModel` 由 `show.session.use(createWorkflow)` 在一次页面会话中创建。导航挂起后返回保留选择，真正关闭后重新打开创建新模型。工厂显式传入 TaskService 和会话期限；每次调用再传入当前显示的确认端口。模型不依赖节点或 UIManager 的返回协议，业务测试无需启动 Cocos。卡片页与紧凑页复用同一个工厂。
 
-页面显示的数据来自多个模块时，订阅也要覆盖这些来源。`TaskService.subscribe()` 立即通知当前状态，并同时订阅任务事件和 Profile 状态；其他模块改变余额或领取记录，当前任务页也会更新。主动取消或结束 show 会解绑两种来源，订阅初始化失败也会回收已登记的监听。
+Service 和 ViewModel 对外统一暴露 `ReadonlyState<T>`。`TaskService.state` 显式派生自训练进度与 `ProfileApi.state`；其他模块改变余额或领取记录，所有皮肤同步更新。领域事件用于记录已经发生的事实，界面当前值直接来自状态；不再由每个页面拼装订阅和手动 refresh。
 
 ## 5. 预制体与渲染
 
@@ -118,44 +118,110 @@ const samples = await show.config.load(SamplesTable, { bundle: ShowcaseBundles.e
 
 ## 7. 状态、准备、取消与换皮
 
-静态确认框直接使用参数与 show.finish；只有几个动态字段时，在 onShow 内创建局部 State 即可。复杂界面把相同的 State/方法接口放入普通 ViewModel 类，工作台的“增加 ViewModel”生成这种结构。不需要继承基类，也不需要额外 Presenter、Controller 或字符串命令总线。
+### 日常开发的默认流程
+
+1. Service 负责规则、共享事实、配置、存档和网络；公开 `ReadonlyState<T>` 与业务方法。跨模块只使用对方的 `public.ts`。
+2. 有选择、筛选或多步交互时，使用普通 ViewModel。只保存局部状态，用 `derive` 组合 Service 状态，用 `Command` 定义异步操作。
+3. 在独立工厂中明确传入依赖。页面用 `show.session.use(factory)` 获取本次会话的模型。
+4. View / Part 负责节点、排版、输入和资源；每次显示重新注册绑定。需要什么数据才能显示，由 `await model.start()` 和必需区域绑定明确表达。
+
+静态确认框直接使用参数和 `show.finish`。只有短暂的局部显示值时可在 onShow 创建 State；需要在导航返回后保留的状态放进页面会话。复杂界面按独立区域组合普通模型与 Part，仍使用同一套状态、操作和期限规则。
+
+以下是任务页的实际用法，`createWorkflow` 和 `workflowCall` 位于模块的 `code/presentation/workflow.ts`：
 
 ```ts
-const data = new State({ selectedId: 0, coins: 10 });
-show.bindings.watch(data.readonly, s => s.coins, coins => {
-    this.lblCoins.string = String(coins);
-});
-show.listen(this.btnSelect.node, Button.EventType.CLICK, () => {
-    data.update(s => ({ ...s, selectedId: 1 }));
+const model = show.session.use(createWorkflow);
+await model.start(); // 本页的任务规则是必需数据
+show.bindings.text(this.lblOutput, model.state,
+    state => `余额 ${state.coins} 金币 · 训练 ${state.progress} 次`);
+show.bindings.command(this.btnClaim, model.claim, model.state, {
+    args: state => state.cards.find(card => card.id === state.selectedId)!,
+    enabled: state => state.cards.some(card => card.id === state.selectedId && card.state === 'ready'),
+    call: workflowCall(show),
 });
 ```
 
-复杂页先 await model.start() 获取初始业务数据，再按区域绑定。selector 默认用 Object.is 比较，修改无关字段时复用旧分支；多字段 selector 可提供 equals。大量列表用 VirtualList，更新条目状态不要整表重新 setItems。每帧移动与动画保留在 onTick 中，不把高频节点坐标放入不可变状态。
+工厂只同步创建和组合模型。`session.use` 不隐式加载所有远程数据。任务规则缺失时可以阻止本页打开；商城推荐、排行榜头像等独立内容可先显示占位，使用 `prepare({ required: false })` 在本区加载与反馈错误。首次必需准备失败使打开失败并保留原页，可选区域失败只影响本区。
+
+### 四种使用期限
+
+| 所有者                            | 存放内容                                     | 结束时机                 |
+| --------------------------------- | -------------------------------------------- | ------------------------ |
+| 模块 / 外部业务会话               | 共享事实、业务 Service、需要后台继续的工作   | 模块或业务会话结束       |
+| `show.session.scope`              | 页面 ViewModel、选择、筛选、页面级数据准备   | 真正关闭；导航挂起仍保留 |
+| `show.scope` / `activation.scope` | 输入、状态订阅、显示绑定、本次显示发起的交互 | 隐藏、挂起或关闭         |
+| 实例期限                          | 缓存节点与组件实例                           | 节点最终销毁             |
+
+一次页面打开固定参数。导航返回仍为同一会话，但 showId、show.scope、show.ui 和显示绑定全部更新。真正关闭再打开时，即使复用缓存节点，也创建新会话并使用新参数。模型不能保存某一轮 show、show.ui 或节点。需要弹窗时，调用的 context 提供本次显示的语义端口；例中的 `confirm(card, owner): Promise<boolean>` 以 false 表达取消，以抛错表达故障，适配器负责把 UI 的结果协议转换过来。
+
+### 一致的只读状态与派生
 
 ```ts
-show.bindings.prepare(model.state, s => s.itemIds, {
+const selected = new State<number | undefined>(undefined);
+const selectedCard = derive(owner, [service.state, selected.readonly],
+    (facts, id) => facts.cards.find(card => card.id === id));
+```
+
+State 只接收普通数据，复制并冻结新分支。状态与命令参数不保存节点、资源、服务或函数。`derive` 在定义时显式列出依赖，只接受框架 State / derive；计算只读传入快照，必须纯同步，禁止写状态、读取未声明状态或返回 Promise。所有相关派生完成后才通知 View，菱形依赖不会发布新旧分支混合的中间状态。
+
+`batch(() => { ... })` 同步合并相关写入的通知，嵌套在最外层结束刷新。批内和观察者重入期间对同一状态的待通知写入合并为最新值。batch 不是事务，抛错不会撤销已写入的数据。钱包与奖励记录等业务一致性必须由 Service 的提交协议保证。
+
+默认相等比较为 Object.is；派生集合可显式提供 equals，相等时保留旧快照身份。计算初次失败直接抛给创建方；后续失败停止受影响的派生和下游，读取抛错，并向错误通道报告，重新创建才恢复。计算错误代表模型缺陷；可预期的网络失败应由 Command 转成语义反馈。owner 结束时释放依赖和订阅，最后快照仍可读取。普通观察者失败会被移除并单独上报，不影响 Service 已完成的提交。
+
+### 受管操作与每次调用
+
+操作定义在模型内固定策略和容量，多个按钮只借用定义：
+
+```ts
+const save = new Command(owner, {
+    policy: 'exclusive',
+    execute: async (input: Readonly<{ id: number }>, task) => {
+        const result = await service.save(input.id, task.signal);
+        task.commit(() => feedback.set(result));
+    },
+});
+const invocation = save.invoke({ id }, { owner: show.scope, context: undefined });
+if (invocation) await invocation.result;
+```
+
+| 协议                   | 规则                                                                      |
+| ---------------------- | ------------------------------------------------------------------------- |
+| 参数                   | 点击 / invoke 时复制冻结；等待确认期间切换选择不会改变本次目标            |
+| `exclusive`            | 同一 key 从准入到实际清理结束都互斥，重复返回 undefined                   |
+| `latest`               | 替换旧结果与后续提交；旧工作仍实际退出，计入汇总 cleaning                 |
+| `serial`               | 每个 key 有固定容量，包含执行和清理；结果尽早交付，下一项等待前项实际清理 |
+| key                    | 默认整个操作；需要逐个商品 / 邮件独立执行时显式提供稳定业务 ID            |
+| `result`               | 本次业务结果、错误或取消；不等待清理，也不被清理错误替换                  |
+| `completed`            | 本次工作与清理实际结束；清理错误单独拒绝并报告                            |
+| `command.state`        | queued、running、cleaning、pending、busy；来自调度器，无需模型另设 busy   |
+| `command.canRun(args)` | 当前参数对应的准入；内部先解锁再发布空闲，观察者可以立即重试              |
+
+取消只停止等待和后续展示提交。已提交的服务端请求仍须由业务会话处理结果、幂等和对账；不能因为页面关闭就丢弃已经发生的业务事实。确认弹窗失败时页面可以先显示“失败，正在清理”，按钮由 Command 保持禁用，真正清理完成才恢复。`Actions` 是动态命名工作的便捷入口，与 Command 共用调度机制；稳定业务操作使用 Command。
+
+### 渲染、属性所有权和资源
+
+`text` / `property` 只在选中值变化时写入。`command` 同时管理按钮可交互属性和点击转发。一个受管属性只能有一个写入者，重复注册抛出 `BINDING_PROPERTY_OWNED`；手写 watch 可用 `writes: [[label, 'string']]` 声明所有权。普通直接赋值不会被拦截，业务代码仍须遵守同一规则。
+
+多语言绑定参与相同的属性所有权检查，重绑前显式 dispose 旧绑定。AsyncButton 自己管理 interactable；使用模型 Command 的页面优先用原生 Button 加 command 绑定，避免同时启用自动防连点绑定。只解绑一个按钮不关闭共享 Command，也不取消其他界面的调用；本次调用由 call.owner 管理。
+
+```ts
+show.bindings.prepare(model.state, state => state.itemIds, {
     label: 'items',
+    required: false, // 本区可先显示占位；默认 true 时加入整页首绘屏障
     prepare: async (ids, stage) => {
-        // 候选资源归 stage.scope，成功显示后框架继续持有它。
         const assets = show.assets.in(stage.scope);
         return await prepareItems(ids, assets, stage.signal);
     },
-    render: (next, _ids, previous) => {
-        // 同步隐藏旧内容、显示新内容，返回后旧资源才会回收。
-        replaceItems(next, previous);
-    },
+    render: (next, _ids, previous) => replaceItems(next, previous),
+    onError: error => showRegionFailure(error),
 });
 ```
 
-onShow 返回后框架自动等待必需绑定的最新代次，组件准备导致状态改变时也会重新核对。初始必需内容失败会使打开失败并保留原页；可选区域用 required: false 并自行显示占位。后续 prepare 失败可用 onError 显示区域反馈并保留旧内容，再调用返回绑定的 refresh() 重试；选择器和 render 错误属于界面故障。
+候选资源由 stage.scope 持有，只有最新代次可以同步交接；旧资源在新内容显示成功后才释放。取消先阻止回写，再等待工作实际退出。不要在 prepare 中等待自己的 dispose，也不要用 Command 的短期 Scope 持有操作结束后还要显示的节点。UIView 在 onShow 和组件准备后核对必需绑定；选择器及同步 render 错误进入宿主故障通道。后续 prepare 失败可保留旧内容，用返回句柄的 refresh() 重试。
 
-订阅同步立即推送、重入按顺序排队、所有者取消时同步解绑。错误订阅被移除并上报，不能让 Service 已完成的写入变成业务失败。prepare 必须响应 signal 或最终结束；取消只阻止回写，不提前释放仍被使用的资源。不要在 prepare 中等待自己的 dispose，也不要用 Actions 的短期 Scope 持有准备完还要显示的节点。
+两个换皮界面默认各有页面会话和局部选择，共享 Service 和模型实现。确需共用同一模型实例时，由明确的外部业务会话持有，每次调用仍传入当前显示端口，每个 View 独立绑定资源。布局一致只替换图片或字体，布局不同则使用各自 View / Prefab。同一逻辑 ViewKey 的皮肤在 App 创建前选择 Prefab；同时显示两套布局使用不同 Key。
 
-确认、导航、音效是一次性操作，通过明确的效果端口或调用执行，不能用“弹窗待打开”状态让订阅者自行消费。确认保留 completed/cancelled/failed/cleanupPending，失败和取消都不提交领取。exclusive 在工作及清理期间持续防重入；领域 Service 仍需处理跨界面的幂等性。
-
-两个皮肤默认各自创建 ViewModel，共享 Service，选择/加载/反馈互不污染。确实共享一个 ViewModel 时，由外部业务流程持有它并提供交互端口，每个 View 独立绑定；关闭其中一个 View 不应关闭业务流程或另一份资源。
-
-单纯换图片/字体可用同一个 View。节点结构不同时使用各自 View/Prefab；示例卡片页可进入紧凑页，业务与存档不复制。同一逻辑 ViewKey 的皮肤在 App 创建前替换对应 ViewDefinition.prefab，参数与结果合同保持一致；同时展示两套布局则登记不同 Key，缓存自然隔离。此版本不增加运行中全局热换肤机制。
+大量列表使用 VirtualList、稳定 ID 和条目级更新；卡片状态变化不重建节点。每帧坐标、粒子和动画保留在 onTick 中。规范约束的是状态、所有权、操作和错误协议，不要求每个小弹窗建立所有层。
 
 ## 8. 验证与发布
 

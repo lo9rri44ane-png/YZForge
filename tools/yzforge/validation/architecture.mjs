@@ -84,6 +84,27 @@ export async function architectureCheck(root, modules) {
             }
         };
         contract(forward(resolve(module.directory, 'public.ts')));
+        // ViewModel 的全部传递依赖（包括 type-only）都必须与渲染层隔离。
+        // 组合工厂使用 *.model.ts 或独立功能文件，不能放回模型中隐藏 UI 依赖。
+        const checkModel = (file, seen = new Set()) => {
+            if (seen.has(file)) return;
+            seen.add(file);
+            for (const edge of dependencies.imports(file)) {
+                if (
+                    edge.spec === 'cc' ||
+                    edge.spec.startsWith('cc/') ||
+                    edge.target?.startsWith(framework + 'ui/') ||
+                    edge.target?.startsWith(framework + 'components/')
+                ) {
+                    errors.push(`${relative(root, file)}: ViewModel 不能依赖引擎或显示层：${edge.spec}`);
+                    continue;
+                }
+                if (edge.target?.startsWith(forward(resolve(module.directory, 'code')) + '/'))
+                    checkModel(edge.target, seen);
+            }
+        };
+        for (const file of await files(resolve(module.directory, 'code'), '.ts'))
+            if (file.endsWith('ViewModel.ts')) checkModel(forward(file));
     }
     if (errors.length) throw Error([...new Set(errors)].join('\n'));
 }

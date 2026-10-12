@@ -4,10 +4,13 @@ import { type ErrorReporter, invariant, OperationCancelled, reportError } from '
 import type { Lifetime, TaskContext } from '../../../core/scope';
 import { ComponentScope, type ComponentContext } from '../../../components/component-scope';
 import { AsyncButtonController } from './async-button-controller';
+import { claimProperties } from '../../../core/property-lease';
 const { ccclass, property, disallowMultiple, menu } = _decorator;
 
 /** 一次按钮绑定；dispose 仅结束该次绑定，不影响同一组件后来建立的绑定。 */
 export interface AsyncButtonHandle {
+    /** 最近一次开始的点击的物理清理屏障；与 press 的结果独立。 */
+    readonly completed: Promise<void>;
     /** 程序触发；忙碌或不可交互时返回 false，业务错误拒绝 Promise。 */
     press(): Promise<boolean>;
     /** 修改空闲时能否点击；忙碌期间仍保持禁用。 */
@@ -67,17 +70,22 @@ export class AsyncButton extends Button {
             scope = this.lifetime.binding;
             return await handle.press();
         } finally {
-            try {
-                await handle?.dispose();
-            } finally {
+            if (handle) {
+                // 结果先交付；清理错误独立报告，不能覆盖业务错误或阻止失败提示。
+                const finish = () =>
+                    handle!.dispose().finally(() => {
+                        this.runningConvenience = false;
+                        if (
+                            this.lifetime.binding === scope &&
+                            this.lifetime.context === activation &&
+                            !activation.scope.signal.aborted
+                        )
+                            this.onAutomaticActivate(activation);
+                    });
+                // 保留忙碌显示直到实际清理结束，再解绑并恢复自动防连点。
+                void handle.completed.then(finish, finish).catch(reportError);
+            } else {
                 this.runningConvenience = false;
-                if (
-                    handle &&
-                    this.lifetime.binding === scope &&
-                    this.lifetime.context === activation &&
-                    !activation.scope.signal.aborted
-                )
-                    this.onAutomaticActivate(activation);
             }
         }
     }
@@ -107,11 +115,28 @@ export class AsyncButton extends Button {
         const originalVisible = visual?.active ?? false;
         let enabled = original,
             busy = false;
+        let release = () => {};
+        let clicked = () => {};
+        let claimed = false;
         const scope = this.lifetime.begin(owner, 'async-button', () => {
             node.off(Button.EventType.CLICK, clicked);
-            if (isValid(this, true)) this.interactable = original;
-            if (isValid(visual, true)) visual!.active = originalVisible;
+            if (claimed && isValid(this, true)) this.interactable = original;
+            if (claimed && isValid(visual, true)) visual!.active = originalVisible;
+            release();
         });
+        try {
+            const releaseButton = claimProperties(this, ['interactable']);
+            release = releaseButton;
+            const releaseVisual = visual ? claimProperties(visual, ['active']) : () => {};
+            release = () => {
+                releaseVisual();
+                releaseButton();
+            };
+            claimed = true;
+        } catch (error) {
+            void scope.close().catch(reportError);
+            throw error;
+        }
         const render = () => {
             if (!this.lifetime.current(scope)) return;
             this.interactable = enabled && !busy;
@@ -125,7 +150,7 @@ export class AsyncButton extends Button {
             scope.signal.throwIfAborted();
             return this.enabledInHierarchy && this.interactable ? controller.press() : Promise.resolve(false);
         };
-        const clicked = () => {
+        clicked = () => {
             if (scope.signal.aborted) return;
             void press().catch((error: unknown) => {
                 if (!(error instanceof OperationCancelled)) onError(error);
@@ -134,6 +159,9 @@ export class AsyncButton extends Button {
         node.on(Button.EventType.CLICK, clicked);
         render();
         return Object.freeze({
+            get completed() {
+                return controller.completed;
+            },
             press,
             setInteractable: (value: boolean) => {
                 scope.signal.throwIfAborted();

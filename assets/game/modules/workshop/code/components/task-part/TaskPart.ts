@@ -10,19 +10,24 @@ const { ccclass } = _decorator;
 export class TaskPart extends TaskPartBinding {
     private model?: TaskCardModel;
     private claim?: (id: number) => Promise<void>;
+    private canClaim = true;
     private currentActivation?: ActivationContext;
     /** 可在激活前赋值，也可在业务事件到达后局部刷新。 */
-    render(model: TaskCardModel, claim?: (id: number) => Promise<void>): void {
+    render(
+        model: TaskCardModel,
+        input?: { readonly claim?: (id: number) => Promise<void>; readonly enabled?: boolean },
+    ): void {
         const changed = this.model?.id !== model.id;
         this.model = model;
         if (changed && this.currentActivation) this.bindBadge(this.currentActivation);
-        if (claim) this.claim = claim;
+        if (input?.claim) this.claim = input.claim;
+        if (input?.enabled !== undefined) this.canClaim = input.enabled;
         this.lblTitle.string = model.title;
         this.lblDetail.string = `训练 ${model.progress} / ${model.goal} · 奖励 ${model.reward} 金币`;
         this.lblState.string = { locked: '未完成', ready: '可领取', claimed: '已领取' }[model.state];
-        this.btnClaim.interactable = model.state === 'ready';
+        this.btnClaim.interactable = model.state === 'ready' && this.canClaim;
         const opacity = this.btnClaim.getComponent(UIOpacity);
-        if (opacity) opacity.opacity = model.state === 'ready' ? 255 : 110;
+        if (opacity) opacity.opacity = this.btnClaim.interactable ? 255 : 110;
     }
     /** 自定义激活钩子绑定输入；禁用或销毁时自动解绑。 */
     protected onActivate(activation: ActivationContext): void {

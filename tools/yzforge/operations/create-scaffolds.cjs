@@ -196,27 +196,42 @@ export class ${className}ViewModel {
     private readonly data = new State<${className}State>({ ready: false });
     /** View 只能读取和订阅；输入通过本类的明确方法调用。 */
     readonly state = this.data.readonly;
-    /** @param owner 本次显示的期限；共享实例显式使用外部流程期限。 */
+    private started = false;
+    /** @param owner 页面会话期限；导航挂起不结束，真正关闭才回收。 */
     constructor(private readonly owner: Lifetime) {}
-    /** 初始取数在这里组织；异步工作使用 runTask/Actions，并检查取消后再写状态。 */
-    start(): void { this.owner.signal.throwIfAborted(); this.data.set({ ready: true }); }
+    /** 明确的必需数据准备；独立区域不要放进整页屏障。稳定异步操作使用 Command。 */
+    start(): void {
+        this.owner.signal.throwIfAborted();
+        if (this.started) return;
+        this.started = true;
+        this.data.set({ ready: true });
+    }
 }
+`;
+            files[path.join(code, `${className}.model.ts`)] =
+                `import type { ViewModelFactory } from '${ui.replace(/ui-view$/, 'view-session')}';
+import type { ${className}Params } from '${types}';
+import { ${className}ViewModel } from './${className}ViewModel';
+/** 同步组合依赖；通过 ctx.services 显式取得 Service，只向模型传入所需依赖。 */
+export const create${className}Model: ViewModelFactory<${className}ViewModel, ${className}Params> = ({ scope }) =>
+    new ${className}ViewModel(scope);
 `;
             files[path.join(code, `${className}.ts`)] = `import { _decorator } from 'cc';
 import type { ViewShowContext } from '${ui}';
 import type { ${className}Params, ${className}Result } from '${types}';
 import { ${className}Binding } from './generated/${className}Binding';
-import { ${className}ViewModel, type ${className}State } from './${className}ViewModel';
+import type { ${className}State } from './${className}ViewModel';
+import { create${className}Model } from './${className}.model';
 const { ccclass } = _decorator;
 /** View 负责节点和输入；ViewModel 提供语义状态及操作。 */
 @ccclass('${manifest.id}.${className}')
 export class ${className} extends ${className}Binding {
-    /** 每次显示创建独立实例；复杂资源区域使用 show.bindings.prepare。 */
+    /** 返回页面复用模型；每次显示独立绑定，复杂资源区域使用 show.bindings.prepare。 */
     protected onShow(show: ViewShowContext<${className}Params, ${className}Result>): void {
-        const model = new ${className}ViewModel(show.scope);
+        const model = show.session.use(create${className}Model);
         show.bindings.watch(model.state, state => state, state => this.render(state));
         model.start();
-        // 输入用 show.listen 连接 model 的明确方法；一次性导航/确认通过显式交互端口注入。
+        // 同步输入用 show.listen；异步操作用 show.bindings.command，交互端口随每次调用传入。
     }
     /** 只同步更新节点。按区域选择状态，避免余额变化重建整张列表。 */
     private render(_state: ${className}State): void { /* 使用自动绑定的节点。 */ }

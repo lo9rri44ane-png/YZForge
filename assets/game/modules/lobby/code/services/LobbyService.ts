@@ -2,14 +2,19 @@ import type { ModuleContext } from '../../../../../framework/modules/module-mana
 import type { Lifetime } from '../../../../../framework/core/scope';
 import type { ProfileApi, WalletSnapshot } from '../../../profile/public';
 import { EconomyTable } from '../../../common/public';
+import type { ReadonlyState } from '../../../../../framework/core/state';
 
 /** 大厅业务组合：通过账号模块公开 API 操作状态，通过公共配置合同读取奖励定义。 */
 export class LobbyService {
+    /** 共享账号状态使用框架统一的只读协议。 */
+    readonly state: ReadonlyState<WalletSnapshot>;
     /** 依赖由模块工厂显式传入，无全局单例或字符串服务查找。 */
     constructor(
         private readonly ctx: ModuleContext,
         private readonly profile: ProfileApi,
-    ) {}
+    ) {
+        this.state = profile.state;
+    }
     /** 读取公共资源包中的奖励配置，不启动 common 模块工厂。 */
     async reward(owner: Lifetime): Promise<{ title: string; amount: number }> {
         this.ctx.scope.signal.throwIfAborted();
@@ -21,13 +26,5 @@ export class LobbyService {
     claim(amount: number): WalletSnapshot {
         this.ctx.scope.signal.throwIfAborted();
         return this.profile.changeCoins(amount);
-    }
-    /** 当前账号状态，用于新创建的 Part 初次渲染。 */
-    snapshot(): WalletSnapshot {
-        return this.profile.snapshot();
-    }
-    /** 共享账号状态随当前页面使用期限自动解绑。 */
-    subscribe(callback: (state: WalletSnapshot) => void, owner: Lifetime): () => void {
-        return this.profile.subscribe(callback, owner);
     }
 }

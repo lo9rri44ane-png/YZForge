@@ -29,6 +29,7 @@ try{await w.loadURL(args.url);return w.id;}catch(error){w.destroy();throw error;
         );
     const click = async (nodeExpression) => {
         const position = await run(`
+await new Promise(resolve=>cc.director.once(cc.Director.EVENT_AFTER_DRAW,resolve));
 const node=(${nodeExpression});if(!cc.isValid(node,true))throw Error('Click target missing');
 const camera=cc.director.getScene().getComponentsInChildren(cc.Camera).find(c=>(c.visibility&node.layer)!==0);
 if(!camera)throw Error('UI camera missing');const p=camera.worldToScreen(node.worldPosition),canvas=cc.game.canvas,rect=canvas.getBoundingClientRect();

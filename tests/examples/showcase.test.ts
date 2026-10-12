@@ -8,13 +8,13 @@ import { Storage } from '../../assets/framework/storage/storage';
 import { WalletService } from '../../assets/game/modules/profile/code/services/WalletService';
 import { TaskService } from '../../assets/game/modules/workshop/code/services/TaskService';
 import { TaskBadges, taskBadge } from '../../assets/game/modules/workshop/contracts/badges';
-import { WorkflowPageViewModel } from '../../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPageViewModel';
+import { WorkflowPageViewModel } from '../../assets/game/modules/workshop/code/presentation/WorkflowPageViewModel';
 import { LabClock } from '../../assets/game/modules/showcase/code/services/LabClock';
 import { StorageLab, LabWallet, LabStorageBackend } from '../../assets/game/modules/showcase/code/services/StorageLab';
 import type { ModuleContext } from '../../assets/framework/modules/module-manager';
 import type { ProfileApi } from '../../assets/game/modules/profile/public';
 import type { TasksRow } from '../../assets/game/modules/workshop/contracts/generated/config/Tasks.types';
-import type { ViewResult } from '../../assets/framework/ui/ui-manager';
+import type { WorkflowInteraction } from '../../assets/game/modules/workshop/code/presentation/WorkflowPageViewModel';
 import { flush, deferred } from '../fake-clock';
 const row: TasksRow = { id: 1, name: '初次训练', goal: 1, reward: 20, quality: 'normal', economy: 1 };
 async function setup(rows: readonly TasksRow[] = [row]) {
@@ -35,11 +35,10 @@ async function setup(rows: readonly TasksRow[] = [row]) {
     const wallet = new WalletService(ctx);
     const profile: ProfileApi = {
         moduleId: 'profile',
-        snapshot: () => wallet.snapshot(),
+        state: wallet.state,
         changeCoins: (n) => wallet.changeCoins(n),
         claimReward: (id, amount) => wallet.claimReward(id, amount),
         hasReward: (id) => wallet.hasReward(id),
-        subscribe: (callback, owner) => wallet.subscribe(callback, owner),
     };
     const tasks = new TaskService(ctx, profile);
     await tasks.load(scope);
@@ -54,10 +53,10 @@ test('task domain rejects incomplete commands and persists reward deduplication 
         s.tasks.train();
         assert.equal(s.tasks.claim(row.id), true);
         assert.equal(s.tasks.claim(row.id), false);
-        assert.equal(s.wallet.snapshot().coins, 20);
+        assert.equal(s.wallet.state.value.coins, 20);
         const recreated = new WalletService(s.ctx);
         assert.equal(recreated.claimReward('workshop/task/1', 20), false);
-        assert.equal(recreated.snapshot().coins, 20);
+        assert.equal(recreated.state.value.coins, 20);
         assert.equal(s.tasks.cards([row])[0].state, 'claimed');
     } finally {
         await s.scope.close();
@@ -70,12 +69,12 @@ test('failed reward write changes neither balance nor idempotency record, and re
         s.tasks.train();
         s.backend.failKey = 'test:profile.wallet';
         assert.throws(() => s.tasks.claim(row.id), { code: 'STORAGE_WRITE_FAILED' });
-        assert.equal(s.wallet.snapshot().coins, 0);
+        assert.equal(s.wallet.state.value.coins, 0);
         assert.equal(s.wallet.hasReward('workshop/task/1'), false);
         s.backend.failKey = '';
         assert.equal(s.tasks.claim(row.id), true);
         assert.equal(s.tasks.claim(row.id), false);
-        assert.equal(s.wallet.snapshot().coins, 20);
+        assert.equal(s.wallet.state.value.coins, 20);
     } finally {
         await s.scope.close();
     }
@@ -106,75 +105,79 @@ test('simulated domain failure and training write failure leave old state unchan
     try {
         s.backend.failKey = 'test:workshop.progress';
         assert.throws(() => s.tasks.train(), { code: 'STORAGE_WRITE_FAILED' });
-        assert.equal(s.tasks.snapshot().progress, 0);
+        assert.equal(s.tasks.state.value.progress, 0);
         s.backend.failKey = '';
         s.tasks.train();
         s.tasks.simulateFailure();
         assert.throws(() => s.tasks.claim(row.id), /模拟请求失败/);
-        assert.equal(s.wallet.snapshot().coins, 0);
+        assert.equal(s.wallet.state.value.coins, 0);
         assert.equal(s.tasks.claim(row.id), true);
     } finally {
         await s.scope.close();
     }
 });
 
-test('ViewModel waits for confirmation and coalesces duplicate commands without a rendering port', async () => {
-    const s = await setup(),
+function claim(model: WorkflowPageViewModel, id: number, owner: Scope, confirm: WorkflowInteraction['confirm']) {
+    const card = model.state.value.cards.find((card) => card.id === id)!;
+    return model.claim.invoke(card, { owner, context: { confirm } });
+}
+
+test('confirmation uses captured arguments and duplicate commands cannot grant twice', async () => {
+    const s = await setup([row, { ...row, id: 2, name: 'second' }]),
         show = s.scope.child('show'),
-        answer = deferred<ViewResult<boolean>>();
-    let opens = 0;
-    const model = new WorkflowPageViewModel(s.tasks, show, {
-        confirm: () => {
-            opens++;
-            return answer.promise;
-        },
-    });
+        answer = deferred<boolean>();
+    const model = new WorkflowPageViewModel(s.tasks, s.scope);
+    let opens = 0,
+        confirmed = 0;
+    const confirm: WorkflowInteraction['confirm'] = (card) => {
+        opens++;
+        confirmed = card.id;
+        return answer.promise;
+    };
     try {
         await Promise.all([model.start(), model.start()]);
-        assert.equal(model.state.value.cards.length, 1);
         model.train();
-        const first = model.claim(1),
-            repeated = model.claim(1);
+        const first = claim(model, 1, show, confirm)!;
+        assert.equal(claim(model, 1, show, confirm), undefined);
         await flush();
+        model.select(2);
         assert.equal(opens, 1);
+        assert.equal(confirmed, 1);
         assert.equal(model.state.value.claiming, true);
-        assert.equal(s.wallet.snapshot().coins, 0);
-        answer.resolve({ status: 'completed', value: true });
-        await Promise.all([first, repeated]);
-        await flush();
-        assert.equal(model.state.value.coins, 20);
+        assert.equal(s.wallet.state.value.coins, 0);
+        answer.resolve(true);
+        await first.result;
+        await first.completed;
+        assert.equal(s.wallet.state.value.coins, 20);
+        assert.equal(s.wallet.hasReward('workshop/task/1'), true);
+        assert.equal(s.wallet.hasReward('workshop/task/2'), false);
+        assert.equal(model.state.value.selectedId, 2);
         assert.equal(model.state.value.feedback.code, 'granted');
         assert.equal(model.state.value.claiming, false);
-        await show.close();
-        const before = model.state.value;
-        s.tasks.train();
-        await flush();
-        assert.equal(model.state.value, before);
     } finally {
+        answer.resolve(false);
         await s.scope.close();
     }
 });
 
-test('two skins share business facts while keeping local selection and lifetimes independent', async () => {
-    const s = await setup([row, { ...row, id: 2, name: '第二项' }]);
+test('two skins share facts, preserve card identity and keep page selection independent', async () => {
+    const s = await setup([row, { ...row, id: 2, name: 'second' }]);
     const a = s.scope.child('cards'),
         b = s.scope.child('compact');
-    const effects = { confirm: async (): Promise<ViewResult<boolean>> => ({ status: 'cancelled' }) };
-    const cards = new WorkflowPageViewModel(s.tasks, a, effects),
-        compact = new WorkflowPageViewModel(s.tasks, b, effects);
+    const cards = new WorkflowPageViewModel(s.tasks, a),
+        compact = new WorkflowPageViewModel(s.tasks, b);
     try {
         await Promise.all([cards.start(), compact.start()]);
         compact.select(2);
         assert.equal(cards.state.value.selectedId, 1);
         assert.equal(compact.state.value.selectedId, 2);
         s.tasks.train();
-        await flush();
         assert.equal(cards.state.value.cards[0].state, 'ready');
         const branch = cards.state.value.cards;
         s.wallet.changeCoins(7);
         assert.equal(cards.state.value.coins, 7);
         assert.equal(compact.state.value.coins, 7);
-        assert.equal(cards.state.value.cards, branch, 'unrelated wallet changes preserve card branch identity');
+        assert.equal(cards.state.value.cards, branch);
         s.wallet.claimReward('workshop/task/1', 20);
         assert.equal(cards.state.value.cards[0].state, 'claimed');
         assert.equal(compact.state.value.cards[0].state, 'claimed');
@@ -189,61 +192,58 @@ test('two skins share business facts while keeping local selection and lifetimes
     }
 });
 
-test('task observer removes both sources on unsubscribe or initial callback failure', async () => {
-    const s = await setup();
+test('service state isolates observers and synchronous unsubscribe detaches all business sources', async () => {
+    const s = await setup(),
+        faults: unknown[] = [];
     try {
         let failedCalls = 0;
-        assert.throws(() =>
-            s.tasks.subscribe(() => {
+        s.tasks.state.subscribe(
+            s.scope,
+            () => {
                 failedCalls++;
-                throw Error('Initial render failed');
-            }, s.scope),
+                throw Error('broken skin');
+            },
+            (e) => faults.push(e),
         );
         s.tasks.train();
         s.wallet.changeCoins(1);
-        await flush();
-        assert.equal(failedCalls, 1, 'failed registration must not leave either source subscribed');
+        assert.equal(failedCalls, 1);
+        assert.equal(faults.length, 1);
         let calls = 0;
-        const off = s.tasks.subscribe(() => calls++, s.scope);
-        assert.equal(calls, 1, 'deliver current state immediately');
-        s.tasks.train(); // Event delivery has been queued but has not run yet.
+        const off = s.tasks.state.subscribe(s.scope, () => calls++);
+        assert.equal(calls, 1);
         off();
         off();
+        s.tasks.train();
         s.wallet.changeCoins(1);
-        await flush();
-        assert.equal(calls, 1, 'unsubscribe must also suppress queued notifications');
+        assert.equal(calls, 1);
     } finally {
         await s.scope.close();
     }
 });
 
-test('cancelled and failed confirmation remain distinct and neither commits rewards', async () => {
-    for (const outcome of [
-        { status: 'cancelled' } as const,
-        { status: 'failed', error: Error('UI fault'), cleanupPending: true } as const,
-    ]) {
-        const s = await setup();
-        const cleanup = deferred();
-        const model = new WorkflowPageViewModel(s.tasks, s.scope, {
-            confirm: async (_card, owner) => {
-                owner.defer(() => cleanup.promise);
-                return outcome;
-            },
-        });
+test('confirmation cancellation and adapter failure are distinct; retry stays blocked through physical cleanup', async () => {
+    for (const failed of [false, true]) {
+        const s = await setup(),
+            cleanup = deferred();
+        const model = new WorkflowPageViewModel(s.tasks, s.scope);
+        const confirm: WorkflowInteraction['confirm'] = async (_card, owner) => {
+            owner.defer(() => cleanup.promise);
+            if (failed) throw Error('adapter failed before delivering a UI result');
+            return false;
+        };
         try {
             await model.start();
             model.train();
-            await model.claim(1);
-            assert.equal(
-                model.state.value.feedback.code,
-                outcome.status === 'cancelled' ? 'cancelled' : 'confirmation-failed',
-            );
+            const invocation = claim(model, 1, s.scope, confirm)!;
+            await invocation.result;
+            assert.equal(model.state.value.feedback.code, failed ? 'confirmation-failed' : 'cancelled');
             assert.equal(model.state.value.claiming, true);
-            if (outcome.status === 'failed') assert.equal(model.state.value.feedback.cleanupPending, true);
-            assert.deepEqual(s.tasks.snapshot(), { progress: 1, coins: 0 });
-            assert.equal(s.wallet.hasReward('workshop/task/1'), false);
+            assert.equal(!!model.state.value.feedback.cleanupPending, failed);
+            assert.equal(s.wallet.state.value.coins, 0);
+            assert.equal(claim(model, 1, s.scope, confirm), undefined);
             cleanup.resolve();
-            await flush();
+            await invocation.completed;
             assert.equal(model.state.value.claiming, false);
             assert.equal(!!model.state.value.feedback.cleanupPending, false);
         } finally {
@@ -253,12 +253,40 @@ test('cancelled and failed confirmation remain distinct and neither commits rewa
     }
 });
 
-test('a display fault cannot turn a committed reward into a failed business operation', async () => {
+test('page session survives display replacement, old interaction cannot submit and new display can retry', async () => {
+    const s = await setup([row, { ...row, id: 2 }]),
+        firstShow = s.scope.child('first-show'),
+        answer = deferred<boolean>();
+    const model = new WorkflowPageViewModel(s.tasks, s.scope);
+    try {
+        await model.start();
+        model.train();
+        model.select(2);
+        const pending = claim(model, 2, firstShow, () => answer.promise)!;
+        await flush();
+        firstShow.cancel();
+        await assert.rejects(pending.result, { code: 'OPERATION_CANCELLED' });
+        assert.equal(model.state.value.claiming, true);
+        answer.resolve(true);
+        await firstShow.close();
+        await pending.completed;
+        assert.equal(s.wallet.state.value.coins, 0);
+        assert.equal(model.state.value.selectedId, 2);
+        const secondShow = s.scope.child('second-show');
+        const fresh = claim(model, 2, secondShow, async () => true)!;
+        await fresh.result;
+        await fresh.completed;
+        assert.equal(s.wallet.state.value.coins, 20);
+    } finally {
+        answer.resolve(false);
+        await s.scope.close();
+    }
+});
+
+test('a render fault cannot turn a committed reward into a failed business operation', async () => {
     const s = await setup(),
         faults: unknown[] = [];
-    const model = new WorkflowPageViewModel(s.tasks, s.scope, {
-        confirm: async () => ({ status: 'completed', value: true }),
-    });
+    const model = new WorkflowPageViewModel(s.tasks, s.scope);
     try {
         await model.start();
         model.train();
@@ -267,11 +295,13 @@ test('a display fault cannot turn a committed reward into a failed business oper
             (state) => {
                 if (state.coins) throw Error('skin broken');
             },
-            (error) => faults.push(error),
+            (e) => faults.push(e),
         );
-        await model.claim(1);
+        const invocation = claim(model, 1, s.scope, async () => true)!;
+        await invocation.result;
+        await invocation.completed;
         assert.equal(model.state.value.feedback.code, 'granted');
-        assert.equal(s.wallet.snapshot().coins, 20);
+        assert.equal(s.wallet.state.value.coins, 20);
         assert.equal(faults.length, 1);
     } finally {
         await s.scope.close();

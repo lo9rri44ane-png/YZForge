@@ -27,7 +27,7 @@ export class Dashboard extends DashboardBinding {
         const reward = await service.reward(show.scope);
         this.lblStatus.string = '共享 Profile 服务 · 公共配置 common';
         let wallet: Node | undefined;
-        const renderWallet = () => wallet?.getComponent(WalletPart)?.render(service.snapshot().coins);
+        const renderWallet = () => wallet?.getComponent(WalletPart)?.render(service.state.value.coins);
         const replaceWallet = async () => {
             const previous = wallet;
             wallet = undefined;
@@ -46,9 +46,9 @@ export class Dashboard extends DashboardBinding {
                 await show.assets.destroyInstance(node);
         };
         await replaceWallet();
-        service.subscribe(() => {
+        service.state.subscribe(show.scope, () => {
             show.commit(renderWallet);
-        }, show.scope);
+        });
         await this.readItems(show);
         this.refreshClock(show);
         // 日期展示与日切通知共同继承项目设置，不再分别手写偏移。

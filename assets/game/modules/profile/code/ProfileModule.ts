@@ -13,11 +13,10 @@ export const createProfileModule = defineModule(ProfileModule, { dependencies },
     const wallet = new WalletService(ctx);
     return {
         api: {
-            snapshot: () => wallet.snapshot(),
+            state: wallet.state,
             changeCoins: (delta) => wallet.changeCoins(delta),
             claimReward: (id, amount) => wallet.claimReward(id, amount),
             hasReward: (id) => wallet.hasReward(id),
-            subscribe: (callback, owner) => wallet.subscribe(callback, owner),
             /** 当前模块的稳定 ID。 */ get moduleId() {
                 return ctx.id;
             },

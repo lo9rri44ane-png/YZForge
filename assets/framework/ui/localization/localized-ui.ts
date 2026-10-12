@@ -8,6 +8,7 @@ import type { AssetAccess } from '../../assets/asset-access';
 import type { AssetKind, BundleRef } from '../../assets/asset-types';
 import { FrameworkError, invariant, OperationCancelled, reportError } from '../../core/errors';
 import type { Lifetime } from '../../core/scope';
+import { claimProperties } from '../../core/property-lease';
 import {
     Localization,
     LocaleHandle,
@@ -152,11 +153,12 @@ export class LocalizedBundle implements LocalizedBundleAccess {
         };
         const get = (reader: LocaleReader): TextParameters =>
             typeof values === 'function' ? values(reader) : (values ?? {});
-        texts.get(target)?.dispose();
+        invariant(!texts.has(target), 'BINDING_PROPERTY_OWNED', 'Dispose the previous text binding before rebinding');
         const original = read();
         const releaseFormat = countdown?.retainTextFormat();
         const binding = await this.bind(
             target,
+            [format ? 'textFormat' : 'string', 'font', 'useSystemFont'],
             texts,
             () => {
                 releaseFormat?.();
@@ -204,10 +206,15 @@ export class LocalizedBundle implements LocalizedBundleAccess {
             'I18N_TARGET_CONFLICT',
             '语言图片请使用 Sprite；AsyncSprite 自行管理图片加载',
         );
-        sprites.get(target)?.dispose();
+        invariant(
+            !sprites.has(target),
+            'BINDING_PROPERTY_OWNED',
+            'Dispose the previous sprite binding before rebinding',
+        );
         const original = target.spriteFrame;
         return this.bind(
             target,
+            ['spriteFrame'],
             sprites,
             () => {
                 target.spriteFrame = original;
@@ -240,10 +247,13 @@ export class LocalizedBundle implements LocalizedBundleAccess {
     }
     private async bind<T extends Component>(
         target: T,
+        keys: readonly PropertyKey[],
         slots: WeakMap<T, Slot>,
         restore: () => void,
         prepare: LocaleBinding['prepare'],
     ): Promise<LocalizedBinding> {
+        this.handle.scope.signal.throwIfAborted();
+        const release = claimProperties(target, keys);
         const scope = this.handle.scope.child('ui-binding');
         let live = true;
         let bound: LocalizedBinding | undefined;
@@ -251,12 +261,16 @@ export class LocalizedBundle implements LocalizedBundleAccess {
             dispose: () => {
                 if (!live) return;
                 live = false;
-                if (slots.get(target) === slot) {
-                    slots.delete(target);
-                    if (isValid(target, true)) restore();
+                try {
+                    if (slots.get(target) === slot) {
+                        slots.delete(target);
+                        if (isValid(target, true)) restore();
+                    }
+                } finally {
+                    release();
+                    bound?.dispose();
+                    void scope.close().catch(reportError);
                 }
-                bound?.dispose();
-                void scope.close().catch(reportError);
             },
         };
         slots.set(target, slot);
