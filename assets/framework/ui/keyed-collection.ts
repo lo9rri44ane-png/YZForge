@@ -3,12 +3,13 @@ import { untilCancelled } from '../core/cancellation';
 import { runTask, type Lifetime, type Scope, type TaskContext } from '../core/scope';
 import { batch, reportObserverError } from '../core/state';
 import { ItemBinding, itemKeys, type ItemContext, type ItemKey } from './item-binding';
+import { Preparation } from '../core/preparation';
 
 /** @internal 布局与引擎适配；实例销毁必须登记到 create 的 owner。 */
 export interface CollectionAdapter<T, Item> {
     create(owner: Lifetime): Promise<Item>;
     bind(item: Item, context: ItemContext<T>): Promise<void>;
-    ready?(item: Item): Promise<void>;
+    preparation?(item: Item): Preparation;
     show(item: Item): void;
     order(items: readonly Item[]): void;
     deactivate(item: Item): Promise<void>;
@@ -21,6 +22,7 @@ type Entry<T, Item> = {
     binding?: ItemBinding<T>;
     adopted: boolean;
     closing?: Promise<void>;
+    detachPreparation?: () => void;
 };
 
 /** @internal 候选集合只拥有新增条目；被保留的节点归集合长期持有。 */
@@ -36,6 +38,7 @@ export interface CollectionPlan<T, Item> {
  */
 export class KeyedCollection<T, Item> {
     readonly scope: Scope;
+    readonly preparation: Preparation;
     private displayed = new Map<ItemKey, Entry<T, Item>>();
     private readonly entries = new Set<Entry<T, Item>>();
     private readonly retiring = new Set<Promise<void>>();
@@ -48,6 +51,7 @@ export class KeyedCollection<T, Item> {
         private readonly report: ErrorReporter = reportError,
     ) {
         this.scope = owner.child('parts');
+        this.preparation = new Preparation(this.scope.lifetime);
         this.scope.signal.onAbort(() => {
             for (const entry of this.entries) this.retire(entry);
             this.displayed.clear();
@@ -112,7 +116,11 @@ export class KeyedCollection<T, Item> {
             for (let index = 0; index < plan.entries.length; index++) {
                 const entry = plan.entries[index];
                 entry.binding!.update(plan.data[index], index);
-                if (!entry.adopted) this.adapter.show(entry.item!);
+                if (!entry.adopted) {
+                    const preparation = this.adapter.preparation?.(entry.item!);
+                    if (preparation) entry.detachPreparation = this.preparation.include(preparation);
+                    this.adapter.show(entry.item!);
+                }
                 entry.adopted = true;
             }
             this.displayed = next;
@@ -131,14 +139,8 @@ export class KeyedCollection<T, Item> {
     }
 
     /** 已提交条目最新的必需资源；集合本身的候选提交由外层 StateBinding 等待。 */
-    async ready(): Promise<void> {
-        this.scope.signal.throwIfAborted();
-        const ready = this.adapter.ready;
-        if (ready)
-            await untilCancelled(
-                Promise.all(Array.from(this.displayed.values(), (entry) => ready(entry.item!))),
-                this.scope.signal,
-            );
+    ready(): Promise<void> {
+        return this.preparation.ready();
     }
 
     dispose(): Promise<void> {
@@ -147,6 +149,8 @@ export class KeyedCollection<T, Item> {
 
     private retire(entry: Entry<T, Item>): void {
         if (entry.closing) return;
+        entry.detachPreparation?.();
+        entry.detachPreparation = undefined;
         let release!: () => void;
         const barrier = new Promise<void>((resolve) => {
             release = resolve;

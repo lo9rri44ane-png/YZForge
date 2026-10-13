@@ -3,6 +3,7 @@ import { untilCancelled } from './cancellation';
 import { runTask, type Lifetime, type Scope, type TaskContext } from './scope';
 import { State, type ReadonlyState, type Snapshot, reportObserverError, synchronousStateEffect } from './state';
 import { claimProperties } from './property-lease';
+import { Preparation } from './preparation';
 
 /** 一块显示区域的准备屏障和控制入口。资源归绑定所有，不归 ViewModel 或短期 Actions 所有。 */
 export interface StateBinding {
@@ -49,8 +50,8 @@ type Stage<T> = { scope: Scope; prepared?: T; retiring?: boolean };
  * 也可给外部流程单独创建；不拥有或关闭传入的 ViewModel，多个皮肤可各自订阅。
  */
 export class StateBindings {
-    private readonly required = new Set<StateBinding>();
-    private revision = 0;
+    /** @internal 组合区域接入此准备树；业务使用 ready。 */
+    readonly preparation: Preparation;
     private preparing = true;
 
     /** @param fault 渲染错误的宿主故障处理器，与业务命令失败分开。 */
@@ -58,7 +59,9 @@ export class StateBindings {
         protected readonly owner: Lifetime,
         protected readonly current: () => boolean = () => true,
         protected readonly fault: ErrorReporter = reportError,
-    ) {}
+    ) {
+        this.preparation = new Preparation(owner);
+    }
 
     /** 单向属性绑定；选择值未变化不写入，不能再为同一属性注册其他受管写入者。 */
     property<O extends object, K extends keyof O, S>(
@@ -123,32 +126,15 @@ export class StateBindings {
     /** 等待已注册的必需绑定；UIView 在 onShow 后自动调用，后加的绑定可单独等待其 ready。 */
     async ready(): Promise<void> {
         try {
-            for (;;) {
-                const revision = this.revision;
-                try {
-                    await Promise.all(Array.from(this.required, (binding) => binding.ready));
-                } catch (error) {
-                    if (revision === this.revision) throw error;
-                }
-                this.owner.signal.throwIfAborted();
-                if (revision === this.revision) return;
-            }
+            await this.preparation.ready();
         } finally {
             this.preparing = false;
         }
     }
 
     /** @internal 让组合区域参与同一首绘屏障，不再创建第二套页面准备调度器。 */
-    protected include(binding: StateBinding, required = true): () => void {
-        if (required) this.required.add(binding);
-        this.revision++;
-        const detach = this.owner.defer(() => {
-            this.required.delete(binding);
-        });
-        return () => {
-            if (this.required.delete(binding)) this.revision++;
-            detach();
-        };
+    protected include(preparation: Preparation, required = true): () => void {
+        return required ? this.preparation.include(preparation) : () => {};
     }
 
     private connect<S, T, P>(
@@ -157,6 +143,7 @@ export class StateBindings {
         options: Omit<PrepareBinding<T, P>, 'prepare'> & { prepare?: PrepareBinding<T, P>['prepare'] },
     ): StateBinding {
         const owner = this.owner.child(`binding:${options.label ?? 'state'}`);
+        const preparation = new Preparation(owner.lifetime);
         const releases: (() => void)[] = [];
         try {
             for (const [target, key] of options.writes ?? []) releases.push(claimProperties(target, [key]));
@@ -169,7 +156,6 @@ export class StateBindings {
             for (const release of releases) release();
         });
         let painted = false;
-        let latest: Promise<void> = Promise.resolve();
         let selected: T;
         let selectedOnce = false;
         let pending: Stage<P> | undefined;
@@ -200,9 +186,7 @@ export class StateBindings {
                 retire(pending);
                 pending = undefined;
             }
-            this.revision++;
-            latest = Promise.reject(error);
-            void latest.catch(() => {});
+            preparation.set(Promise.reject(error));
             fail(error, false);
         };
         const commit = (stage: Stage<P>, prepared: P, value: T) => {
@@ -242,15 +226,13 @@ export class StateBindings {
             selected = value;
             selectedOnce = true;
             if (!options.prepare) {
-                latest = Promise.resolve();
+                preparation.set();
                 rendering = true;
                 try {
                     synchronousStateEffect(options.render(undefined as P, value, undefined));
                     painted = true;
                 } catch (error) {
-                    this.revision++;
-                    latest = Promise.reject(error);
-                    void latest.catch(() => {});
+                    preparation.set(Promise.reject(error));
                     fail(error, false);
                 } finally {
                     rendering = false;
@@ -263,7 +245,6 @@ export class StateBindings {
                 return;
             }
             if (pending) retire(pending);
-            this.revision++;
             const stage: Stage<P> = { scope: owner.child('revision') };
             pending = stage;
             let preparing = true;
@@ -277,8 +258,7 @@ export class StateBindings {
                 () => active() && pending === stage,
                 'prepare',
             );
-            latest = untilCancelled(physical, stage.scope.signal);
-            void latest.catch(() => {});
+            preparation.set(untilCancelled(physical, stage.scope.signal));
             void physical.then(
                 () => {
                     if (displayed !== stage) retire(stage);
@@ -298,32 +278,17 @@ export class StateBindings {
             void owner.close().catch((cause) => reportObserverError(this.fault, cause));
             throw error;
         }
-        const ready = async () => {
-            for (;;) {
-                const expected = latest;
-                try {
-                    await untilCancelled(expected, owner.signal);
-                } catch (error) {
-                    if (owner.signal.aborted || latest === expected) throw error;
-                }
-                if (latest === expected) return;
-            }
-        };
+        const remove = this.include(preparation, options.required !== false);
         const binding = Object.freeze({
             get ready() {
-                return ready();
+                return preparation.ready();
             },
             refresh: () => update(source.value, true),
             dispose: () => {
-                if (this.required.delete(binding)) this.revision++;
+                remove();
                 owner.cancel();
                 return owner.drainCancelledTasks().then(() => owner.close());
             },
-        });
-        if (options.required !== false) this.required.add(binding);
-        this.revision++;
-        owner.defer(() => {
-            this.required.delete(binding);
         });
         return binding;
     }

@@ -8,6 +8,8 @@ import { PartPresentation, type PartOptions, type PartCell } from '../../part-pr
 import { ViewBindings } from '../../view-bindings';
 import type { ItemKey } from '../../item-binding';
 import { FixedVirtualLayout, type VirtualListAlignment, type VirtualListLayout } from './virtual-list-layout';
+import type { Preparation } from '../../../core/preparation';
+import { claimProperties } from '../../../core/property-lease';
 
 const { ccclass, requireComponent, disallowMultiple } = _decorator;
 
@@ -29,6 +31,8 @@ export interface VirtualListOptions<T, Part extends GameComponent> extends PartO
 
 /** 一次挂载的类型化操作入口；结束后不能再更新数据，dispose 可重复调用。 */
 export interface VirtualListHandle<T> {
+    /** @internal 接入宿主准备树；业务等待 ready。 */
+    readonly preparation: Preparation;
     /** 当前窗口最新必需内容的准备屏障；失败立即拒绝，不等待清理完成。 */
     readonly ready: Promise<void>;
     /** 当前数据数量。 */
@@ -96,6 +100,7 @@ export class VirtualList extends Component {
      * @param options 本次所有者、资源入口、业务条目与固定布局。
      * @returns 仅属于本次挂载的类型化入口，不能跨页面展示复用。
      * @throws VIRTUAL_LIST_SETUP 结构、布局所有权或尺寸非法；VIRTUAL_LIST_MOUNTED 旧会话尚未清理。
+     * @throws BINDING_PROPERTY_OWNED Content 已由其他受管组合持有，包括空列表及清理中的组合。
      */
     mount<T, Part extends GameComponent>(options: VirtualListOptions<T, Part>): VirtualListHandle<T> {
         options.owner.signal.throwIfAborted();
@@ -119,47 +124,55 @@ export class VirtualList extends Component {
         );
         type Cell = PartCell<Part>;
         const report = options.onError ?? reportError;
-        let presentation!: PartPresentation<T, Part>;
-        const controller = new VirtualListController<T, Cell>(
-            options.owner,
-            options.layout,
-            {
-                create: async (owner) => {
-                    const cell = await presentation.create(owner),
-                        node = cell.node;
-                    invariant(
-                        node.getComponent(UITransform),
-                        'VIRTUAL_LIST_SETUP',
-                        '条目根节点缺少指定 Part 或 UITransform',
-                    );
-                    this.assertManualLayout(node);
-                    return cell;
-                },
-                place: (cell, index, layout) => {
-                    const itemTransform = cell.node.getComponent(UITransform)!;
-                    const { itemWidth, itemHeight } = layout.options;
-                    if (itemTransform.width !== itemWidth || itemTransform.height !== itemHeight) {
-                        itemTransform.setContentSize(itemWidth, itemHeight);
-                        // ON_WINDOW_RESIZE 不会响应复用时的根尺寸变化；仅在尺寸改变时立即对齐子 Widget。
-                        for (const widget of cell.node.getComponentsInChildren(Widget))
-                            if (widget.node !== cell.node && widget.enabled) widget.updateAlignment();
-                    }
-                    const position = layout.position(index);
-                    const x = position.x + itemWidth * itemTransform.anchorX,
-                        y = -position.y - itemHeight * (1 - itemTransform.anchorY);
-                    if (cell.node.position.x !== x || cell.node.position.y !== y || cell.node.position.z !== 0)
-                        cell.node.setPosition(x, y, 0);
-                },
-                bind: (cell, context) => presentation.bind(cell, context),
-                ready: (cell) => presentation.ready(cell),
-                activate: (cell) => presentation.show(cell),
-                deactivate: (cell) => presentation.deactivate(cell),
-            },
-            options.key,
-            report,
-        );
+        const owner = options.owner.child('virtual-list-mount');
         try {
-            presentation = new PartPresentation(
+            const release = claimProperties(content, ['children']);
+            const session = { dispose: () => owner.close() };
+            owner.defer(() => {
+                if (this.session === session) this.session = undefined;
+            });
+            // 所有实例和调度器都是子级，完整退出后才归还 Content。
+            owner.defer(release);
+            this.session = session;
+            const controller: VirtualListController<T, Cell> = new VirtualListController<T, Cell>(
+                owner,
+                options.layout,
+                {
+                    create: async (owner) => {
+                        const cell = await presentation.create(owner),
+                            node = cell.node;
+                        invariant(
+                            node.getComponent(UITransform),
+                            'VIRTUAL_LIST_SETUP',
+                            '条目根节点缺少指定 Part 或 UITransform',
+                        );
+                        this.assertManualLayout(node);
+                        return cell;
+                    },
+                    place: (cell, index, layout) => {
+                        const itemTransform = cell.node.getComponent(UITransform)!;
+                        const { itemWidth, itemHeight } = layout.options;
+                        if (itemTransform.width !== itemWidth || itemTransform.height !== itemHeight) {
+                            itemTransform.setContentSize(itemWidth, itemHeight);
+                            // ON_WINDOW_RESIZE 不会响应复用时的根尺寸变化；仅在尺寸改变时立即对齐子 Widget。
+                            for (const widget of cell.node.getComponentsInChildren(Widget))
+                                if (widget.node !== cell.node && widget.enabled) widget.updateAlignment();
+                        }
+                        const position = layout.position(index);
+                        const x = position.x + itemWidth * itemTransform.anchorX,
+                            y = -position.y - itemHeight * (1 - itemTransform.anchorY);
+                        if (cell.node.position.x !== x || cell.node.position.y !== y || cell.node.position.z !== 0)
+                            cell.node.setPosition(x, y, 0);
+                    },
+                    bind: (cell, context) => presentation.bind(cell, context),
+                    preparation: (cell) => cell.preparation!,
+                    activate: (cell) => presentation.show(cell),
+                    deactivate: (cell) => presentation.deactivate(cell),
+                },
+                options.key,
+                report,
+            );
+            const presentation: PartPresentation<T, Part> = new PartPresentation<T, Part>(
                 controller.scope,
                 content,
                 options.assets,
@@ -177,55 +190,48 @@ export class VirtualList extends Component {
                     else report(error);
                 },
             );
-        } catch (error) {
-            void controller.dispose().catch(report);
-            throw error;
-        }
-        this.session = controller;
-        let syncing = false;
-        const assertActive = () => controller.scope.signal.throwIfAborted();
-        const checkWidth = (layout: typeof controller.layout) =>
-            invariant(
-                layout.width <= view.width + 0.01,
-                'VIRTUAL_LIST_SETUP',
-                '固定列宽和边距超过视口，请缩小条目或减少列数',
-            );
-        const sync = (reset = false) => {
-            if (syncing || controller.scope.signal.aborted) return;
-            syncing = true;
-            try {
-                const offset = reset ? 0 : scroll.getScrollOffset().y;
-                controller.setViewport(view.height, offset);
-                transform.setContentSize(view.width, controller.contentHeight);
-                scroll.stopAutoScroll();
-                scroll.scrollToOffset(new Vec2(0, controller.scrollOffset));
-                controller.setViewport(view.height, scroll.getScrollOffset().y);
-            } finally {
-                syncing = false;
-            }
-        };
-        const scrolling = () => {
-            if (!syncing && !controller.scope.signal.aborted)
-                controller.setViewport(view.height, scroll.getScrollOffset().y);
-        };
-        const resized = () => {
-            try {
-                sync();
-            } catch (error) {
-                report(error);
-                void controller.dispose().catch(report);
-            }
-        };
-        const detach = controller.scope.signal.onAbort(() => {
-            scroll.node.off(ScrollView.EventType.SCROLLING, scrolling);
-            view.node.off(Node.EventType.SIZE_CHANGED, resized);
-            if (isValid(scroll, true)) scroll.stopAutoScroll();
-        });
-        controller.scope.defer(() => {
-            detach();
-            if (this.session === controller) this.session = undefined;
-        });
-        try {
+            let syncing = false;
+            const assertActive = () => controller.scope.signal.throwIfAborted();
+            const checkWidth = (layout: typeof controller.layout) =>
+                invariant(
+                    layout.width <= view.width + 0.01,
+                    'VIRTUAL_LIST_SETUP',
+                    '固定列宽和边距超过视口，请缩小条目或减少列数',
+                );
+            const sync = (reset = false) => {
+                if (syncing || controller.scope.signal.aborted) return;
+                syncing = true;
+                try {
+                    const offset = reset ? 0 : scroll.getScrollOffset().y;
+                    controller.setViewport(view.height, offset);
+                    transform.setContentSize(view.width, controller.contentHeight);
+                    scroll.stopAutoScroll();
+                    scroll.scrollToOffset(new Vec2(0, controller.scrollOffset));
+                    controller.setViewport(view.height, scroll.getScrollOffset().y);
+                } finally {
+                    syncing = false;
+                }
+            };
+            const scrolling = () => {
+                if (!syncing && !controller.scope.signal.aborted)
+                    controller.setViewport(view.height, scroll.getScrollOffset().y);
+            };
+            const resized = () => {
+                try {
+                    sync();
+                } catch (error) {
+                    report(error);
+                    void session.dispose().catch(report);
+                }
+            };
+            const detach = controller.scope.signal.onAbort(() => {
+                scroll.node.off(ScrollView.EventType.SCROLLING, scrolling);
+                view.node.off(Node.EventType.SIZE_CHANGED, resized);
+                if (isValid(scroll, true)) scroll.stopAutoScroll();
+            });
+            controller.scope.defer(() => {
+                detach();
+            });
             checkWidth(controller.layout);
             scroll.horizontal = false;
             scroll.vertical = true;
@@ -234,48 +240,49 @@ export class VirtualList extends Component {
             sync(true);
             scroll.node.on(ScrollView.EventType.SCROLLING, scrolling);
             view.node.on(Node.EventType.SIZE_CHANGED, resized);
+            return Object.freeze({
+                preparation: controller.preparation,
+                get ready() {
+                    return controller.ready();
+                },
+                get count() {
+                    return controller.count;
+                },
+                setItems: (items: readonly T[], resetScroll = false) => {
+                    assertActive();
+                    controller.setItems(items);
+                    sync(resetScroll);
+                },
+                updateItem: (index: number, data: T) => controller.updateItem(index, data),
+                refresh: (indices?: Iterable<number>) => controller.refresh(indices),
+                setLayout: (layout: VirtualListLayout) => {
+                    assertActive();
+                    // 先校验，不让失败配置破坏当前可用列表。
+                    const candidate = new FixedVirtualLayout(layout);
+                    checkWidth(candidate);
+                    controller.setLayout(layout);
+                    sync();
+                },
+                scrollToIndex: (index: number, alignment: VirtualListAlignment = 'start', durationSeconds = 0) => {
+                    assertActive();
+                    invariant(
+                        Number.isFinite(durationSeconds) && durationSeconds >= 0,
+                        'VIRTUAL_LIST_DURATION',
+                        '滚动时长必须为有限非负秒数',
+                    );
+                    const target = controller.scrollTarget(index, alignment);
+                    scroll.stopAutoScroll();
+                    scroll.scrollToOffset(new Vec2(0, target), durationSeconds);
+                    scrolling();
+                },
+                whenIdle: () => controller.whenIdle(),
+                inspect: () => controller.inspect(),
+                dispose: session.dispose,
+            });
         } catch (error) {
-            void controller.dispose().catch(report);
+            void owner.close().catch(report);
             throw error;
         }
-        return Object.freeze({
-            get ready() {
-                return controller.ready();
-            },
-            get count() {
-                return controller.count;
-            },
-            setItems: (items: readonly T[], resetScroll = false) => {
-                assertActive();
-                controller.setItems(items);
-                sync(resetScroll);
-            },
-            updateItem: (index: number, data: T) => controller.updateItem(index, data),
-            refresh: (indices?: Iterable<number>) => controller.refresh(indices),
-            setLayout: (layout: VirtualListLayout) => {
-                assertActive();
-                // 先校验，不让失败配置破坏当前可用列表。
-                const candidate = new FixedVirtualLayout(layout);
-                checkWidth(candidate);
-                controller.setLayout(layout);
-                sync();
-            },
-            scrollToIndex: (index: number, alignment: VirtualListAlignment = 'start', durationSeconds = 0) => {
-                assertActive();
-                invariant(
-                    Number.isFinite(durationSeconds) && durationSeconds >= 0,
-                    'VIRTUAL_LIST_DURATION',
-                    '滚动时长必须为有限非负秒数',
-                );
-                const target = controller.scrollTarget(index, alignment);
-                scroll.stopAutoScroll();
-                scroll.scrollToOffset(new Vec2(0, target), durationSeconds);
-                scrolling();
-            },
-            whenIdle: () => controller.whenIdle(),
-            inspect: () => controller.inspect(),
-            dispose: () => controller.dispose(),
-        });
     }
     private assertManualLayout(node: Node): void {
         invariant(

@@ -167,7 +167,7 @@ test('ready 跟随同 ID 的资源更新及更新期间的新版本，取消不�
                 });
                 return cell.bindings.ready();
             },
-            ready: (cell) => cell.bindings!.ready(),
+            preparation: (cell) => cell.bindings!.preparation,
             place: () => {},
             activate: () => {},
             deactivate: async () => {},

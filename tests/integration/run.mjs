@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 const groups = {
     presentation: {
         description: '状态绑定、首屏/清理屏障、组件准备顺序、双皮肤与缓存重开；需 workshop 示例',
-        files: ['verify-presentation.mjs', 'verify-composition.mjs'],
+        files: ['verify-presentation.mjs', 'verify-composition.mjs', 'verify-preparation-tree.mjs'],
     },
     ui: {
         description: '弹窗排序/真实输入、生命周期/缓存/动态组件、异常清理；需展示模块',
@@ -29,7 +29,10 @@ const groups = {
     },
     audio: { description: '音频并发、前后台与回收；需大厅示例', files: ['verify-audio.mjs'] },
     network: { description: '真实本机 HTTP、红点与聚焦引导；需展示模块', files: ['verify-network-guide.mjs'] },
-    list: { description: '虚拟列表、复用与尺寸变化；需展示模块', files: ['verify-virtual-list.mjs'] },
+    list: {
+        description: '虚拟列表、复用、尺寸变化及组合容器独占；需展示模块',
+        files: ['verify-virtual-list.mjs', 'verify-container-ownership.mjs'],
+    },
     showcase: { description: '全部功能展示与页面导航；需包含全部示例的 Web 构建', files: ['verify-showcase.mjs'] },
 };
 

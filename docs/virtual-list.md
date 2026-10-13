@@ -25,6 +25,8 @@ node_list                    ScrollView + VirtualList + UITransform
 
 `ScrollView.content` 指向 Content，Content 的直接父级是 View。列表挂载后接管 Content 的尺寸、左上锚点 `(0, 1)` 和条目位置，使用纵向滚动并禁用横向滚动。Content 和条目根节点不能有启用的 Layout / Widget；不要另外用动画驱动它们的位置。Content 使用单位缩放、不旋转。条目根节点必须有 UITransform 与指定的 GameComponent 派生类，尺寸由布局覆盖，锚点可以不同。业务动效建议放到根节点下的 Visual 子节点。
 
+Content 的直接子节点由一次挂载独占，空数据、禁用和等待清理期间仍保留所有权。与其他列表或 `part/items` 共用同一 Content 会抛 `BINDING_PROPERTY_OWNED`；必须等待原句柄的 `dispose()` 完成才能接管。挂载失败也会清理已取得的所有权。
+
 条目内部可以使用 Widget / Layout。列表改变根尺寸时会立即对齐启用的子 Widget，兼容 `ON_WINDOW_RESIZE`；没有尺寸变化时不会遍历子 Widget。文本换行、缩放策略、图标和按钮由业务 Part 设置。固定尺寸条目不应通过文本反向改变根高度。
 
 挂载和 `setLayout` 时总列宽（含边距/间距）不得超过视口宽度。窗口尺寸变化会自动重新计算可见行、Content 高度和实例容量，不自动改变列数或条目宽度；缩窄后超宽内容由 Mask 裁切。需要响应式列数时，由页面根据新宽度调用 `setLayout`。先使 View 完成布局，再 mount；高度为 0 时暂不创建条目。
@@ -166,7 +168,7 @@ bind(item: PartContext<Row>): void {
 npm run verify
 npm run test:showcase
 # Creator 中运行 Bootstrap 的浏览器预览后，填入当前 MCP 返回的本机预览端口：
-node tests/integration/verify-virtual-list.mjs http://127.0.0.1:7456/
+npm run test:integration -- list --url http://127.0.0.1:7456/
 ```
 
 单元测试覆盖稳定 Key、同 ID 数据更新、重排、ready 故障交付、布局、边界、十万条数据、显式刷新、订阅解绑、任务与 Part 清理屏障、加载失败/迟到、关闭和视口变化。类型合同验证数据类型与借用 Lifetime。集成测试使用实际 Cocos 引擎、ScrollView、自动绑定 Part 和资源管理器，验证网格、动画定位、子 Widget 尺寸、快速跳转、清空、禁用、重新挂载及返回再进入；截图保存在 `temp/mcp-captures/virtual-list-*.png`。

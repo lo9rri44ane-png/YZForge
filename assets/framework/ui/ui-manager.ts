@@ -559,6 +559,7 @@ export class UIManager {
         if (record.termination || scope.signal.aborted) return;
         await instance.host.prepare();
         // 组件准备也可能更新 ViewModel，交接画面前再次核对所有区域的当前代次。
+        context.bindings.preparation.include(instance.host.preparation!);
         await context.bindings.ready();
     }
     private activateShow(record: RecordView): void {

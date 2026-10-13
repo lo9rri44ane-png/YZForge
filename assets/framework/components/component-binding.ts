@@ -4,9 +4,12 @@ import type { Scope } from '../core/scope';
 import { runTask, scopeOwner, type Lifetime } from '../core/scope';
 import { untilCancelled } from '../core/cancellation';
 import { invariant } from '../core/errors';
+import { Preparation } from '../core/preparation';
 
 /** @internal 原生组件扩展接入 UI、Part 和列表复用的生命周期，不需要再挂一个脚本。 */
 export interface ComponentBinding {
+    /** 业务组件当前必需绑定的变化，随实例存在、随激活更新。 */
+    readonly __preparation?: Preparation;
     /** 注入实例所属模块。 */
     __bind(context: ModuleContext, instance: Scope): void;
     /** 允许本次显示工作，undefined 表示同步停用。 */
@@ -34,6 +37,9 @@ function hostOf(node: Node): ComponentHost | undefined {
 export class ComponentHost {
     readonly components: ComponentBinding[] = [];
     private activation?: Scope;
+    /** @internal 显示期的组件准备树。 */
+    preparation?: Preparation;
+    private readonly requiredComponents = new Set<ComponentBinding>();
 
     constructor(
         root: Node,
@@ -69,11 +75,16 @@ export class ComponentHost {
 
     /** onShow 内已可接入新组件，原有组件仍由 UI 准备阶段统一激活。 */
     begin(owner: Scope): void {
+        if (this.activation !== owner) {
+            this.preparation = new Preparation(owner.lifetime);
+            this.requiredComponents.clear();
+        }
         this.activation = owner;
     }
 
     allow(owner: Scope | undefined): void {
-        this.activation = owner;
+        if (owner) this.begin(owner);
+        else this.activation = undefined;
         for (const component of this.components) component.__allow(owner);
     }
 
@@ -92,10 +103,26 @@ export class ComponentHost {
         );
         owner.signal.throwIfAborted();
         for (const component of components) if (!component.__ready) component.__allow(owner);
-        await untilCancelled(
-            Promise.all(components.map((component) => component.__prepared?.() ?? Promise.resolve())),
-            owner.signal,
-        );
+        // adopt 只等本次选中的组件，不能等待正在调用 adopt 的祖先组件自身。
+        const checking = owner.child('components:preparation');
+        const preparation = new Preparation(checking.lifetime);
+        try {
+            for (const component of components) {
+                if (!component.__preparation) continue;
+                preparation.include(component.__preparation);
+                if (!this.requiredComponents.has(component)) {
+                    this.preparation!.include(component.__preparation);
+                    this.requiredComponents.add(component);
+                }
+            }
+            await untilCancelled(
+                Promise.all(components.map((component) => component.__prepared?.() ?? Promise.resolve())),
+                owner.signal,
+            );
+            await preparation.ready();
+        } finally {
+            await checking.close();
+        }
     }
 
     adopt(root: Node, caller: Lifetime, moduleId: string | undefined): Promise<void> {
@@ -148,6 +175,11 @@ export async function prepareInstanceComponents(root: Node, owner: Scope): Promi
     host?.begin(owner);
     root.active = true;
     if (host) await host.adopt(root, owner, host.context.id);
+}
+
+/** @internal 已激活实例的当前组件准备，供组合区域向上接入。 */
+export function instancePreparation(root: Node): Preparation | undefined {
+    return hosts.get(root)?.preparation;
 }
 
 /** @internal 注册普通 TypeScript 生命周期对象；不会向节点添加组件。 */

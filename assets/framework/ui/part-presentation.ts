@@ -2,13 +2,14 @@ import { isValid, Node, UIOpacity, UITransform } from 'cc';
 import type { AssetAccess } from '../assets/asset-access';
 import type { AssetKey } from '../assets/asset-types';
 import type { GameComponent } from '../components/game-component';
-import { componentBindings } from '../components/component-binding';
+import { componentBindings, instancePreparation } from '../components/component-binding';
 import { invariant, type ErrorReporter } from '../core/errors';
 import type { Lifetime } from '../core/scope';
 import { synchronousStateEffect } from '../core/state';
 import type { ItemContext } from './item-binding';
 import type { ViewBindings } from './view-bindings';
 import { guardUIInput } from './input-guard';
+import { Preparation } from '../core/preparation';
 
 /** 单个 Part、普通集合、虚拟列表使用同一绑定合同。 */
 export interface PartContext<T> extends ItemContext<T> {
@@ -30,6 +31,7 @@ export interface PartCell<Part> {
     readonly part: Part;
     visible: boolean;
     bindings?: ViewBindings;
+    preparation?: Preparation;
 }
 
 /** @internal 公共引擎适配，不实现集合差异计算或虚拟布局。 */
@@ -98,14 +100,18 @@ export class PartPresentation<T, Part extends GameComponent> {
             (error) => this.fault(error, item),
         );
         cell.bindings = bindings;
+        cell.preparation = new Preparation(item.scope);
+        cell.preparation.include(bindings.preparation);
         synchronousStateEffect(
             this.options.bind(cell.part, Object.freeze({ ...item, bindings, assets: this.assets.in(item.scope) })),
         );
         await bindings.ready();
         item.signal.throwIfAborted();
         await this.assets.prepareInstance(cell.node);
+        const components = instancePreparation(cell.node);
+        if (components) cell.preparation.include(components);
         cell.node.pauseSystemEvents(true);
-        await bindings.ready();
+        await cell.preparation.ready();
         item.signal.throwIfAborted();
     }
 
@@ -113,10 +119,6 @@ export class PartPresentation<T, Part extends GameComponent> {
         cell.node.parent = this.parent;
         cell.visible = true;
         cell.node.resumeSystemEvents(true);
-    }
-
-    ready(cell: PartCell<Part>): Promise<void> {
-        return cell.bindings?.ready() ?? Promise.resolve();
     }
 
     order(cells: readonly PartCell<Part>[]): void {
@@ -127,6 +129,7 @@ export class PartPresentation<T, Part extends GameComponent> {
     deactivate(cell: PartCell<Part>): Promise<void> {
         cell.visible = false;
         cell.bindings = undefined;
+        cell.preparation = undefined;
         if (!isValid(cell.node, true)) return Promise.resolve();
         cell.node.pauseSystemEvents(true);
         const parts = componentBindings(cell.node);

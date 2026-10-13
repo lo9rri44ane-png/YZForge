@@ -1,6 +1,6 @@
 import { type ErrorReporter, FrameworkError, invariant, OperationCancelled, reportError } from '../../../core/errors';
 import { type Lifetime, runTask, Scope } from '../../../core/scope';
-import { untilCancelled } from '../../../core/cancellation';
+import { Preparation } from '../../../core/preparation';
 import { ItemBinding, itemKeys, type ItemContext, type ItemKey } from '../../item-binding';
 import {
     FixedVirtualLayout,
@@ -29,7 +29,7 @@ export interface VirtualListAdapter<T, Item> {
     place(item: Item, index: number, layout: FixedVirtualLayout): void;
     bind(item: Item, context: ItemContext<T>): void | Promise<void>;
     /** 同 ID 数据更新也可能产生新的必需准备。 */
-    ready?(item: Item): Promise<void>;
+    preparation?(item: Item): Preparation;
     activate(item: Item): void;
     /** 必须同步隐藏并禁止新激活，返回旧 Part 工作的退出屏障。 */
     deactivate(item: Item): Promise<void>;
@@ -41,6 +41,7 @@ type Slot<T, Item> = {
     request?: Request<T>;
     binding?: ItemBinding<T>;
     prepared?: boolean;
+    detachPreparation?: () => void;
     state: 'idle' | 'loading' | 'bound' | 'draining' | 'destroying';
 };
 
@@ -49,6 +50,7 @@ type Slot<T, Item> = {
  */
 export class VirtualListController<T, Item> {
     readonly scope: Scope;
+    readonly preparation: Preparation;
     layout: FixedVirtualLayout;
     private data: readonly T[] = [];
     private keys: ItemKey[] = [];
@@ -56,13 +58,12 @@ export class VirtualListController<T, Item> {
     private offset = 0;
     private requests = new Map<ItemKey, Request<T>>();
     private readonly failed = new Map<Request<T>, unknown>();
-    private readonly waiters = new Set<() => void>();
     private readonly slots = new Set<Slot<T, Item>>();
     private readonly pending = new Set<Promise<void>>();
     private readonly closingFailures: unknown[] = [];
     private pumping = false;
     private again = false;
-    private revision = 0;
+    private awaiting?: { promise: Promise<void>; resolve: () => void };
 
     constructor(
         owner: Lifetime,
@@ -73,6 +74,7 @@ export class VirtualListController<T, Item> {
     ) {
         this.layout = new FixedVirtualLayout(layout);
         this.scope = owner.child('virtual-list');
+        this.preparation = new Preparation(this.scope.lifetime);
         this.scope.signal.onAbort(() => {
             this.requests.clear();
             for (const slot of this.slots) this.retire(slot);
@@ -163,45 +165,8 @@ export class VirtualListController<T, Item> {
         while (this.pending.size) await Promise.all(Array.from(this.pending));
     }
     /** 当前窗口最新必需内容就绪；渲染失败立即拒绝，不等待失败后的物理清理。 */
-    async ready(): Promise<void> {
-        for (;;) {
-            this.scope.signal.throwIfAborted();
-            for (const [request, error] of this.failed) if (this.current(request)) throw error;
-            if (
-                Array.from(this.requests.values()).every((request) =>
-                    Array.from(this.slots).some((slot) => slot.request === request && slot.prepared),
-                )
-            ) {
-                const revision = this.revision;
-                try {
-                    const ready = this.adapter.ready;
-                    if (ready)
-                        await untilCancelled(
-                            Promise.all(
-                                Array.from(this.slots)
-                                    .filter((slot) => slot.prepared)
-                                    .map((slot) => ready(slot.item!)),
-                            ),
-                            this.scope.signal,
-                        );
-                } catch (error) {
-                    if (revision === this.revision) throw error;
-                }
-                this.scope.signal.throwIfAborted();
-                if (revision === this.revision) return;
-                continue;
-            }
-            let resume!: () => void;
-            const changed = new Promise<void>((resolve) => {
-                resume = resolve;
-            });
-            this.waiters.add(resume);
-            try {
-                await untilCancelled(changed, this.scope.signal);
-            } finally {
-                this.waiters.delete(resume);
-            }
-        }
+    ready(): Promise<void> {
+        return this.preparation.ready();
     }
     dispose(): Promise<void> {
         return this.scope.close();
@@ -314,6 +279,8 @@ export class VirtualListController<T, Item> {
                     this.adapter.place(slot.item!, request.index, this.layout);
                     await this.adapter.bind(slot.item!, context);
                     context.commit(() => {
+                        const preparation = this.adapter.preparation?.(slot.item!);
+                        if (preparation) slot.detachPreparation = this.preparation.include(preparation);
                         this.adapter.activate(slot.item!);
                         slot.prepared = true;
                     });
@@ -331,6 +298,8 @@ export class VirtualListController<T, Item> {
         if (slot.state !== 'bound') return;
         slot.state = 'draining';
         slot.prepared = false;
+        slot.detachPreparation?.();
+        slot.detachPreparation = undefined;
         const binding = slot.binding!;
         slot.binding = undefined;
         // 先登记到实例父 Scope，再发取消。父级关闭时须等待异步清理完成，
@@ -392,8 +361,23 @@ export class VirtualListController<T, Item> {
         this.pending.add(pending);
     }
     private changed(): void {
-        this.revision++;
-        for (const waiter of this.waiters) waiter();
-        this.waiters.clear();
+        const failure = Array.from(this.failed).find(([request]) => this.current(request));
+        const prepared = Array.from(this.requests.values()).every((request) =>
+            Array.from(this.slots).some((slot) => slot.request === request && slot.prepared),
+        );
+        if (failure || prepared || this.scope.signal.aborted) {
+            this.preparation.set(failure ? Promise.reject(failure[1]) : undefined);
+            this.awaiting?.resolve();
+            this.awaiting = undefined;
+        } else {
+            if (!this.awaiting) {
+                let resolve!: () => void;
+                const promise = new Promise<void>((done) => {
+                    resolve = done;
+                });
+                this.awaiting = { promise, resolve };
+            }
+            this.preparation.set(this.awaiting.promise);
+        }
     }
 }

@@ -162,7 +162,7 @@ show.bindings.items(this.nodeItems, model.state, state => state.cards, {
 
 Part 在 bind 中注册 text/property/command；同 ID 的更新通过 item.state 推送，禁止保存一次初始快照后期待 bind 再次执行。数据更新不会取消该身份下的全部工作；需要随参数替换的请求放进 prepare 或 Command.latest。列表滚动后的选择和编辑草稿由外部模型保留。
 
-`part/items/list` 默认参与页面或组件首绘屏障；可选区域显式设置 required:false 并提供 onError。ready 等待最新必需内容，也覆盖同 ID 数据更新触发的资源准备。part/items 的 refresh 重试尚未提交的集合候选，保留已有条目；已显示条目的资源错误用对应 prepare/present 句柄重试。虚拟列表的 refresh 则完整重建指定身份绑定。dispose 同步撤销该区域的首绘要求和输入，完整清理后才能复用其容器。首次失败、后续准备失败与同步渲染缺陷分别处理。详见[虚拟列表](virtual-list.md)。
+`part/items/list` 默认参与页面或组件首绘屏障；可选区域显式设置 required:false 并提供 onError。ready 等待最新必需内容，也覆盖同 ID 数据更新触发的资源准备。等待期间，条目内部、嵌套 Part 和组件激活绑定的新准备会逐层传递，外层数组不变也会重新核对；虚拟列表只要求当前窗口。可选区域不阻挡父级，直接等待它自己的 ready 仍会等待本区必需资源。part/items 的 refresh 重试尚未提交的集合候选，保留已有条目；已显示条目的资源错误用对应 prepare/present 句柄重试。虚拟列表的 refresh 则完整重建指定身份绑定。dispose 同步撤销该区域的首绘要求和输入，完整清理后才能复用其容器。首次失败、后续准备失败与同步渲染缺陷分别处理。详见[虚拟列表](virtual-list.md)。
 
 ### 四种使用期限
 

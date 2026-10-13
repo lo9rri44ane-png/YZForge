@@ -11,6 +11,7 @@ import { registerComponentBinding } from './component-binding';
 import { invariant, reportError } from '../core/errors';
 import { assertLifecycle, synchronous } from './lifecycle';
 import { runTask, Scope, taskContext, TaskContext, scopeOwner } from '../core/scope';
+import { Preparation } from '../core/preparation';
 const { ccclass } = _decorator;
 /**
  * 组件或 Part 的一次业务激活上下文；禁用或宿主结束时取消，重新激活得到新上下文。
@@ -45,6 +46,9 @@ export interface ActivationContext extends TaskContext {
  */
 @ccclass('yzforge.GameComponent')
 export class GameComponent extends Component {
+    /** @internal 实例级桥接，当前激活的必需绑定随启停接入和移除。 */
+    __preparation?: Preparation;
+    private detachPreparation?: () => void;
     /**
      * onInit 前注入的业务宿主上下文；跨模块 Part 通常使用调用方宿主。
      */
@@ -119,6 +123,7 @@ export class GameComponent extends Component {
         invariant(!this.instance, 'COMPONENT_ALREADY_BOUND', this.name);
         this.ctx = ctx;
         this.instance = instance;
+        this.__preparation = new Preparation(instance.lifetime);
         instance.signal.onAbort(() => {
             this.allowed = false;
             void this.__deactivate().catch(reportError);
@@ -140,7 +145,10 @@ export class GameComponent extends Component {
             void this.__deactivate().catch(reportError);
             return;
         }
-        if (this.enabledInHierarchy && this.initialized && !this.draining) this.activate();
+        if (this.enabledInHierarchy && this.initialized) {
+            if (this.draining) this.__preparation?.set(this.draining);
+            else this.activate();
+        }
     }
     /**
      * @internal
@@ -162,7 +170,10 @@ export class GameComponent extends Component {
      * 引擎生命周期适配入口，由框架调用；业务请重写对应的 onShow、onActivate、onTick 等框架钩子。
      */
     onEnable(): void {
-        if (this.allowed && this.initialized && !this.draining) this.activate();
+        if (this.allowed && this.initialized) {
+            if (this.draining) this.__preparation?.set(this.draining);
+            else this.activate();
+        }
     }
     /**
      * @internal
@@ -235,12 +246,14 @@ export class GameComponent extends Component {
             run: <T>(task: (context: TaskContext) => T | Promise<T>) => runTask(scope, task, current),
         });
         this.activation = activation;
+        this.detachPreparation = this.__preparation!.include(activation.bindings.preparation);
         this.prepared = false;
         try {
             synchronous(this.onActivate(activation), 'onActivate');
             this.preparation = activation.bindings.ready().then(() => {
                 if (current() && !scope.signal.aborted) this.prepared = true;
             });
+            this.__preparation!.set(this.preparation);
             void this.preparation.catch((error) => {
                 if (!scope.signal.aborted) fault(error);
             });
@@ -264,11 +277,15 @@ export class GameComponent extends Component {
      * @returns 本次停用的完整屏障；停用期间重复或重入调用共享结果，包括钩子失败及任务排空。
      */
     __deactivate(): Promise<void> {
+        // 再次停用也撤销清理期间登记的重新激活要求；物理清理仍共享原屏障。
+        this.detachPreparation?.();
+        this.detachPreparation = undefined;
+        this.__preparation?.set();
+        this.prepared = false;
         if (this.draining) return this.draining;
         const activation = this.activation;
         if (!activation) return Promise.resolve();
         this.activation = undefined;
-        this.prepared = false;
         const scope = scopeOwner(activation.scope);
         let failure: { reason: unknown } | undefined;
         // 先发布完整屏障再取消，取消监听和停用钩子重入时也拿到同一结果。

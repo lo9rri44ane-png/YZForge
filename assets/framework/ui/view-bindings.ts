@@ -28,7 +28,7 @@ export interface PartsBinding extends StateBinding {
 }
 
 /** 数据由绑定源唯一驱动；句柄只控制布局、滚动、重试与关闭。 */
-export type BoundVirtualList<T> = Omit<VirtualListHandle<T>, 'setItems' | 'updateItem'>;
+export type BoundVirtualList<T> = Omit<VirtualListHandle<T>, 'setItems' | 'updateItem' | 'preparation'>;
 
 /** 页面常用的受管渲染入口；节点属性和点击监听跟随本次显示，模型及 Command 只被借用。 */
 export class ViewBindings extends StateBindings {
@@ -92,7 +92,7 @@ export class ViewBindings extends StateBindings {
             {
                 create: (scope) => presentation.create(scope),
                 bind: (cell, item) => presentation.bind(cell, item),
-                ready: (cell) => presentation.ready(cell),
+                preparation: (cell) => cell.preparation!,
                 show: (cell) => presentation.show(cell),
                 order: (cells) => presentation.order(cells),
                 deactivate: (cell) => presentation.deactivate(cell),
@@ -115,37 +115,18 @@ export class ViewBindings extends StateBindings {
                     ),
                 this.fault,
             );
-            let revision = 0;
-            const renderer = new StateBindings(owner.lifetime, this.current, this.fault).prepare(
-                source,
-                (state) => {
-                    revision++;
-                    return select(state);
-                },
-                {
-                    label: 'items',
-                    required: options.required,
-                    onError: options.onError,
-                    prepare: (items, task) => collection.prepare(items, task),
-                    render: (plan) => collection.commit(plan),
-                },
-            );
-            const ready = async () => {
-                for (;;) {
-                    const expected = revision;
-                    try {
-                        await renderer.ready;
-                        await collection.ready();
-                    } catch (error) {
-                        if (owner.signal.aborted || revision === expected) throw error;
-                    }
-                    if (revision === expected) return;
-                }
-            };
+            const bindings = new StateBindings(owner.lifetime, this.current, this.fault);
+            bindings.preparation.include(collection.preparation);
+            const renderer = bindings.prepare(source, select, {
+                label: 'items',
+                onError: options.onError ?? (options.required === false ? reportError : undefined),
+                prepare: (items, task) => collection.prepare(items, task),
+                render: (plan) => collection.commit(plan),
+            });
             let remove = () => {};
             const result = Object.freeze({
                 get ready() {
-                    return ready();
+                    return bindings.ready();
                 },
                 refresh: () => renderer.refresh(),
                 dispose: () => {
@@ -154,7 +135,7 @@ export class ViewBindings extends StateBindings {
                 },
                 inspect: () => collection.inspect(),
             });
-            remove = this.include(result, options.required !== false);
+            remove = this.include(bindings.preparation, options.required !== false);
             return result;
         } catch (error) {
             void owner.close().catch(this.fault);
@@ -193,16 +174,16 @@ export class ViewBindings extends StateBindings {
         const owner = this.owner.child('list');
         try {
             const list = target.mount({ ...options, owner, assets: this.assets, interactive: this.interactive });
-            const feed = new StateBindings(owner.lifetime, this.current, this.fault).watch(source, select, (items) =>
-                list.setItems(items),
-            );
+            const feed = new StateBindings(owner.lifetime, this.current, this.fault);
+            feed.watch(source, select, (items) => list.setItems(items));
+            feed.preparation.include(list.preparation);
             let remove = () => {};
             const result = Object.freeze({
                 get count() {
                     return list.count;
                 },
                 get ready() {
-                    return feed.ready.then(() => list.ready);
+                    return feed.ready();
                 },
                 refresh: list.refresh,
                 setLayout: list.setLayout,
@@ -214,7 +195,7 @@ export class ViewBindings extends StateBindings {
                     return owner.close();
                 },
             });
-            remove = this.include(result, options.required !== false);
+            remove = this.include(feed.preparation, options.required !== false);
             return result;
         } catch (error) {
             void owner.close().catch(this.fault);
