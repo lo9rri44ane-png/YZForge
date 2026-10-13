@@ -86,3 +86,28 @@ ESLint、TypeScript ESLint、Prettier 及配套依赖使用精确版本和 packa
 **F5** 选择“YZForge: 调试 Creator 浏览器预览”：先在 Creator 启动浏览器预览，再粘贴完整 URL。URL 在启动时输入，未写死本机端口或项目哈希。使用 VS Code 内置 Edge 调试器；此入口不会自动启动 Creator，也不用于微信/原生真机调试。
 
 完整检查依赖 Creator 已生成 temp 中的 Cocos 类型声明。新检出项目先用 Creator 打开并等待导入完成，再运行检查。编辑器、浏览器集成脚本和平台验证范围见 [实现范围与验证](implementation-status.md)。
+
+## 结构化诊断
+
+自动化调用使用 `node tools/yzforge/cli.mjs check`（或 `generate` / `preview`）直接读取 JSON，避免 npm 命令前缀混入输出。结果保留原有 `ok`、`valid`、`validationErrors`、`message` 和 `code`，附加 `diagnostics` 数组；旧消费者仍可使用原来的字段。字段是否存在取决于原有成功或失败分支。
+
+每条诊断包含 `code`、`severity: "error"` 和可读 `message`；可选字段为项目根相对路径 `file`、从 1 开始的 `line` / `column`、修复提示 `hint` 和文档路径 `docs`。路径使用 `/`。位置来自源码或实际资产，无法准确定位时省略；不解析错误文本来猜行号。
+
+```json
+{
+  "code": "YZ_VIEWMODEL_UI_DEPENDENCY",
+  "severity": "error",
+  "message": "ViewModel 不能依赖引擎或显示层：cc",
+  "file": "assets/game/modules/demo/code/HomeViewModel.ts",
+  "line": 1,
+  "column": 1,
+  "hint": "将节点和 UI 协议留在 View 或交互适配中，ViewModel 只接收纯数据与交互端口。",
+  "docs": "docs/architecture.md"
+}
+```
+
+目前生命周期、模块与架构边界、TypeScript、序列化多语言绑定、生成物过期检查提供分类诊断。例如 `YZ_LIFECYCLE_HOOK`、`YZ_MODULE_BOUNDARY`、`YZ_VIEWMODEL_UI_DEPENDENCY`、`TS2322`、`YZ_LOCALIZED_BINDING`、`YZ_GENERATED_STALE`。其他异常保留已有错误码（例如 `GAME_BUILD_BUSY`），没有错误码时使用 `YZ_TOOL_ERROR`。消费者应容忍新增代码和可选字段，不依赖 `message` 的措辞匹配。
+
+输出与退出语义保持原样：正常返回写 stdout，抛出的异常写 stderr 并以 1 退出；`generate` 已更新产物但使用方校验失败时返回 `valid: false`，普通 CLI 以 1 退出。`--editor` 下该返回仍以 0 退出，以便工作台先刷新资产；`preview` 的校验失败返回也不改变退出码。因此应同时读取结果状态和退出码，不能只看进程是否成功。预览不执行完整 TypeScript 检查，正式验证仍用 `check`。
+
+工作台继续显示原有错误文本，并在子进程错误对象中保留诊断。创建或修改源文件成功、后续生成失败时，返回原有 `generationError` 以及新增的 `generationDiagnostics`；这表示源操作已完成，应修复诊断后重新生成，避免重复创建。自动生成失败的状态可通过 `autoStatus.diagnostics` 查看。运行时排错沿用 [API 指南中的现有诊断入口](api-guide.md)。

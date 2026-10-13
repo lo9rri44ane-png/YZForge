@@ -253,8 +253,19 @@ test('source checks detect inherited engine hooks, iterable spread and framework
             join(root, 'assets/framework/wrong.ts'),
             "import {Example} from '../game/example'; export const wrong=Example;",
         );
-        const issues = await lifecycleCheck(root);
+        const diagnostics = [];
+        const issues = await lifecycleCheck(root, diagnostics);
         assert.ok(issues.some((text) => text.includes('Reserved engine hook onLoad')));
         assert.ok(issues.some((text) => text.includes('Array.from')));
         assert.ok(issues.some((text) => text.includes('cannot import project')));
+        assert.deepEqual(
+            diagnostics.map((item) => item.message),
+            issues,
+        );
+        assert.deepEqual(
+            new Set(diagnostics.map((item) => item.code)),
+            new Set(['YZ_LIFECYCLE_HOOK', 'YZ_ITERABLE_SPREAD', 'YZ_FRAMEWORK_PROJECT_IMPORT']),
+        );
+        assert.ok(diagnostics.every((item) => item.file.startsWith('assets/') && !item.file.includes('\\')));
+        assert.ok(diagnostics.every((item) => item.line === 1 && item.column > 0));
     }));

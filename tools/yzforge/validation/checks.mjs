@@ -2,7 +2,11 @@ import { resolve, relative } from 'node:path';
 import ts from 'typescript';
 import { dependencyResolver, dependencySpecifiers } from './dependencies.mjs';
 import { files, identifier } from '../project/project.mjs';
-export async function lifecycleCheck(root) {
+import diagnosticTools from './diagnostics.cjs';
+
+const { diagnostic, validationError } = diagnosticTools;
+
+export async function lifecycleCheck(root, diagnostics = []) {
     const paths = await files(resolve(root, 'assets'), '.ts');
     const config = ts.readConfigFile(resolve(root, 'tsconfig.json'), ts.sys.readFile);
     const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
@@ -37,15 +41,29 @@ export async function lifecycleCheck(root) {
         )
             continue;
         const isFramework = source.fileName.replaceAll('\\', '/').startsWith(framework);
-        const issue = (node, text) => {
+        const issue = (node, code, text) => {
             const pos = source.getLineAndCharacterOfPosition(node.getStart());
-            errors.push(`${relative(root, source.fileName)}:${pos.line + 1}:${pos.character + 1}: ${text}`);
+            const message = `${relative(root, source.fileName)}:${pos.line + 1}:${pos.character + 1}: ${text}`;
+            errors.push(message);
+            diagnostics.push(
+                diagnostic(code, message, {
+                    root,
+                    file: source.fileName,
+                    line: pos.line + 1,
+                    column: pos.character + 1,
+                    docs: 'docs/api-guide.md',
+                }),
+            );
         };
         const visit = (node) => {
             if (ts.isSpreadElement(node)) {
                 const type = checker.getTypeAtLocation(node.expression);
                 if (!checker.isArrayType(type) && !checker.isTupleType(type))
-                    issue(node, 'Creator loose builds require Array.from(iterable) before spreading non-array values');
+                    issue(
+                        node,
+                        'YZ_ITERABLE_SPREAD',
+                        'Creator loose builds require Array.from(iterable) before spreading non-array values',
+                    );
             }
             if (isFramework) {
                 ts.forEachChild(node, visit);
@@ -61,7 +79,7 @@ export async function lifecycleCheck(root) {
                         !names.includes('AppEntry') &&
                         !names.includes('AppSettings')
                     )
-                        issue(node, 'Business node scripts must inherit GameComponent or UIView');
+                        issue(node, 'YZ_COMPONENT_BASE', 'Business node scripts must inherit GameComponent or UIView');
                     for (const member of node.members) {
                         const name = member.name;
                         let text =
@@ -71,23 +89,40 @@ export async function lifecycleCheck(root) {
                         if (name && ts.isComputedPropertyName(name) && ts.isStringLiteral(name.expression))
                             text = name.expression.text;
                         if (name && ts.isComputedPropertyName(name) && text === null)
-                            issue(member, 'Computed business component member names must be literal and checkable');
+                            issue(
+                                member,
+                                'YZ_COMPONENT_MEMBER',
+                                'Computed business component member names must be literal and checkable',
+                            );
                         if (reserved.has(text))
-                            issue(member, `Reserved engine hook ${text}; use framework lifecycle hooks`);
+                            issue(
+                                member,
+                                'YZ_LIFECYCLE_HOOK',
+                                `Reserved engine hook ${text}; use framework lifecycle hooks`,
+                            );
                     }
                 }
             }
             ts.forEachChild(node, visit);
         };
         if (isFramework)
-            for (const { spec, line } of dependencySpecifiers(source.fileName, source.text)) {
+            for (const { spec, line, column } of dependencySpecifiers(source.fileName, source.text, root)) {
                 const target = ts
                     .resolveModuleName(spec, source.fileName, parsed.options, ts.sys)
                     .resolvedModule?.resolvedFileName.replaceAll('\\', '/');
-                if (target?.includes('/assets/game/'))
-                    errors.push(
-                        `${relative(root, source.fileName)}:${line}: Framework core cannot import project implementation or generated project settings`,
+                if (target?.includes('/assets/game/')) {
+                    const message = `${relative(root, source.fileName)}:${line}: Framework core cannot import project implementation or generated project settings`;
+                    errors.push(message);
+                    diagnostics.push(
+                        diagnostic('YZ_FRAMEWORK_PROJECT_IMPORT', message, {
+                            root,
+                            file: source.fileName,
+                            line,
+                            column,
+                            docs: 'docs/architecture.md',
+                        }),
                     );
+                }
             }
         visit(source);
     }
@@ -192,12 +227,31 @@ export async function codeBoundaryCheck(root, modules) {
         directoryPath: resolve(module.directory).replaceAll('\\', '/') + '/',
         codePath: resolve(module.directory, 'code').replaceAll('\\', '/') + '/',
     }));
-    const errors = [];
+    const errors = [],
+        diagnostics = [];
+    const issue = (code, message, file, line, column) => {
+        errors.push(message);
+        diagnostics.push(
+            diagnostic(code, message, {
+                root,
+                file,
+                line,
+                column,
+                docs: 'docs/architecture.md',
+            }),
+        );
+    };
     for (const file of await files(resolve(root, 'assets/game'), '.ts')) {
         const from = file.replaceAll('\\', '/');
-        for (const { spec, target, line } of dependencies.imports(file)) {
+        for (const { spec, target, line, column } of dependencies.imports(file)) {
             if (!target && spec.startsWith('.')) {
-                errors.push(`${relative(root, file)}:${line}: 无法解析模块边界：${spec}`);
+                issue(
+                    'YZ_DEPENDENCY_UNRESOLVED',
+                    `${relative(root, file)}:${line}: 无法解析模块边界：${spec}`,
+                    file,
+                    line,
+                    column,
+                );
                 continue;
             }
             const owner = boundaries.find((module) => target?.startsWith(module.directoryPath));
@@ -206,10 +260,14 @@ export async function codeBoundaryCheck(root, modules) {
             if (local && (!target.startsWith(owner.codePath) || from.startsWith(owner.codePath))) continue;
             if (!local && target === owner.directoryPath + 'public.ts') continue;
             if (owner.code?.mode === 'eager' && from.endsWith('/app/generated/assembly.ts')) continue;
-            errors.push(
+            issue(
+                'YZ_MODULE_BOUNDARY',
                 `${relative(root, file)}:${line}: 模块边界禁止导入 ${spec}（包含类型引用）；跨模块只使用 public.ts，公开契约不能引用 code`,
+                file,
+                line,
+                column,
             );
         }
     }
-    if (errors.length) throw Error(errors.join('\n'));
+    if (errors.length) throw validationError(errors.join('\n'), diagnostics);
 }

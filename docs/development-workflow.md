@@ -6,16 +6,17 @@
 
 这个示例把任务规则放在 `workshop`，账号余额放在 `profile`，公共配置放在 `common`。`showcase` 负责功能导航和实验。不要按每一个按钮拆模块；共享状态与发布边界才是拆分依据。
 
-| 层         | 真实文件                                                                                                         | 负责什么                                      |
-| ---------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| 示例入口   | [ShowcasePage.ts](../assets/game/modules/showcase/code/ui/showcase-page/ShowcasePage.ts)                         | 通过 show.ui 调用类型化页面 Key，不传导航对象 |
-| 模块装配   | [WorkshopModule.ts](../assets/game/modules/workshop/code/WorkshopModule.ts)                                      | 注入声明的 Profile API，创建 TaskService      |
-| 业务规则   | [TaskService.ts](../assets/game/modules/workshop/code/services/TaskService.ts)                                   | 训练进度、配置查询、领取条件、业务事件        |
-| 账号状态   | [WalletService.ts](../assets/game/modules/profile/code/services/WalletService.ts)                                | 余额、领取去重记录、存档和订阅                |
-| 展示流程   | [WorkflowPageViewModel.ts](../assets/game/modules/workshop/code/presentation/WorkflowPageViewModel.ts)           | 取数、确认、命令、反馈；暴露只读语义状态      |
-| 页面显示   | [WorkflowPage.ts](../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPage.ts)                         | 按钮绑定、动态 Part 创建、同步更新节点        |
-| 可复用部件 | [TaskPart.ts](../assets/game/modules/workshop/code/components/task-part/TaskPart.ts)                             | 接收卡片模型，通过任务 ID 回传点击            |
-| 自动绑定   | [WorkflowPageBinding.ts](../assets/game/modules/workshop/code/ui/workflow-page/generated/WorkflowPageBinding.ts) | 节点引用和类型化 getter，由工作台生成         |
+| 层         | 真实文件                                                                                                         | 负责什么                                         |
+| ---------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| 示例入口   | [ShowcasePage.ts](../assets/game/modules/showcase/code/ui/showcase-page/ShowcasePage.ts)                         | 通过 show.ui 调用类型化页面 Key，不传导航对象    |
+| 模块装配   | [WorkshopModule.ts](../assets/game/modules/workshop/code/WorkshopModule.ts)                                      | 注入声明的 Profile API，创建 TaskService         |
+| 业务规则   | [TaskService.ts](../assets/game/modules/workshop/code/services/TaskService.ts)                                   | 训练进度、配置查询、领取条件、业务事件           |
+| 账号状态   | [WalletService.ts](../assets/game/modules/profile/code/services/WalletService.ts)                                | 余额、领取去重记录、存档和订阅                   |
+| 展示流程   | [WorkflowPageViewModel.ts](../assets/game/modules/workshop/code/presentation/WorkflowPageViewModel.ts)           | 取数、确认、命令、反馈；暴露只读语义状态         |
+| 页面显示   | [WorkflowPage.ts](../assets/game/modules/workshop/code/ui/workflow-page/WorkflowPage.ts)                         | 按钮绑定、动态 Part 创建、同步更新节点           |
+| 交互适配   | [workflow.ts](../assets/game/modules/workshop/code/presentation/workflow.ts)                                     | 组合模型依赖，将当前显示的 UI 调用适配为确认端口 |
+| 可复用部件 | [TaskPart.ts](../assets/game/modules/workshop/code/components/task-part/TaskPart.ts)                             | 将卡片数据和当前交互绑定到领取 Command           |
+| 自动绑定   | [WorkflowPageBinding.ts](../assets/game/modules/workshop/code/ui/workflow-page/generated/WorkflowPageBinding.ts) | 节点引用和类型化 getter，由工作台生成            |
 
 `game/app` 负责启动接入和应用装配，`start-game.ts` 只选择首屏及需要启动持有的模块。业务代码都留在所属模块：Service 管规则和状态，Page / Part 管显示，ViewModel 按需协调复杂交互。跨模块使用公开合同和 API；需要多步业务协调时，普通函数或类也放在发起业务的模块内。
 
@@ -23,14 +24,17 @@
 sequenceDiagram
     participant P as Page / TaskPart
     participant C as ViewModel
+    participant I as workflowCall 交互适配
     participant U as UIManager / ClaimPopup
     participant S as TaskService
     participant W as Profile API / WalletService
-    P->>C: 点击领取，传入任务 ID
-    C->>U: effects.confirm(任务数据, task.scope)
-    U-->>C: completed / cancelled / failed
-    alt 确认领取
-        C->>S: claim(任务 ID)
+    P->>C: 调用 claim，传入 card 和当前 call
+    C->>I: interaction.confirm(card, task.scope)
+    I->>U: show.ui.open，owner 为 task.scope
+    U-->>I: completed / cancelled / failed
+    I-->>C: 确认返回 true，取消返回 false，故障抛错
+    alt 确认且任务仍有效
+        C->>S: claim(card.id)
         S->>S: 检查训练条件
         S->>W: claimReward(稳定 ID, 金额)
         W->>W: 一次保存余额和领取记录
@@ -39,8 +43,12 @@ sequenceDiagram
         C-->>P: 提交状态 → bindings 按区域渲染
     else 取消
         C-->>P: 提交取消反馈，业务状态不变
+    else 确认失败
+        C-->>P: 提交确认失败反馈
     end
 ```
+
+调用期限结束时按任务取消处理，过期任务不再提交反馈或领取奖励；详见本文的使用期限约定。
 
 **不要求每个简单页面都有 ViewModel。** 只有打开提示、显示时间等局部操作时，页面直接使用上下文更清楚。涉及多步交互、多个领域服务、复杂状态和单元测试时，引入 ViewModel；不要给 Service 传入 Label、Node 或页面实例。
 

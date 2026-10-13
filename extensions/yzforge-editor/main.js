@@ -9,6 +9,7 @@ const { formatScript } = require('../../tools/yzforge/generators/format.cjs');
 const bindings = require('../../tools/yzforge/generators/bindings.cjs');
 const naming = require('../../tools/yzforge/project/naming.cjs');
 const layout = require('../../tools/yzforge/project/layout.cjs');
+const { diagnosticsFromError, validationError } = require('../../tools/yzforge/validation/diagnostics.cjs');
 const bundleConfig = require('./bundle-config');
 const localizationLayout = require('../../tools/yzforge/project/localization-layout.cjs');
 const { pathToFileURL } = require('url');
@@ -211,14 +212,21 @@ function runTool(command, extra = []) {
                 if (error) {
                     let message = stderr || stdout || error.message;
                     let code;
+                    let diagnostics;
                     try {
                         const value = JSON.parse(message);
                         message = value.error || value.message || message;
                         code = value.code;
+                        diagnostics = value.diagnostics;
                     } catch {
                         /* Non-JSON process errors remain readable. */
                     }
-                    reject(Object.assign(Error(message), { code }));
+                    reject(
+                        Object.assign(Error(message), {
+                            code,
+                            diagnostics: diagnosticsFromError({ message, code, diagnostics }),
+                        }),
+                    );
                 } else {
                     try {
                         resolve(JSON.parse(stdout));
@@ -361,7 +369,10 @@ const actions = {
         }
         await Editor.Message.request('asset-db', 'refresh-asset', 'db://assets');
         if (result.validationErrors?.length)
-            throw Error('资源索引和 Key 已更新，请修复以下引用后重新检查：\n' + result.validationErrors.join('\n'));
+            throw validationError(
+                '资源索引和 Key 已更新，请修复以下引用后重新检查：\n' + result.validationErrors.join('\n'),
+                result.diagnostics ?? diagnosticsFromError({ message: result.validationErrors.join('\n') }),
+            );
         return result;
     },
     previewTables: () => runTool('preview', ['--preview-formulas']),
@@ -534,7 +545,7 @@ function scheduleGeneration() {
                     scheduleGeneration();
                     return;
                 }
-                autoStatus = { state: 'error', message: error.message };
+                autoStatus = { state: 'error', message: error.message, diagnostics: diagnosticsFromError(error) };
                 console.warn('[YZForge] 自动生成未完成：' + error.message);
             },
         );
@@ -566,11 +577,11 @@ exports.load = function () {
                 scheduleGeneration();
         });
         sourceWatcher.on('error', (error) => {
-            autoStatus = { state: 'error', message: error.message };
+            autoStatus = { state: 'error', message: error.message, diagnostics: diagnosticsFromError(error) };
         });
     }
     void bundleConfig.ensurePresets().catch((error) => {
-        autoStatus = { state: 'error', message: error.message };
+        autoStatus = { state: 'error', message: error.message, diagnostics: diagnosticsFromError(error) };
     });
 };
 exports.unload = function () {
@@ -721,8 +732,9 @@ exports.methods = {
                         await actions.generate();
                         autoStatus = { state: 'ready', message: '动态清单与配置已同步' };
                     } catch (error) {
-                        autoStatus = { state: 'error', message: error.message };
-                        return { ...value, generationError: error.message };
+                        const diagnostics = diagnosticsFromError(error);
+                        autoStatus = { state: 'error', message: error.message, diagnostics };
+                        return { ...value, generationError: error.message, generationDiagnostics: diagnostics };
                     }
                 }
                 succeeded = true;

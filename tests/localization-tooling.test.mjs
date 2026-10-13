@@ -302,9 +302,20 @@ const {asset} = ShopI18n; export const destructured = asset['images/logo'];`,
     for (const uuid of ['uuid-zh', 'uuid-en'])
         f.metadata.get(uuid).source = f.metadata.get(uuid).source.replace('logo.', 'renamed.');
     await writeFile(join(f.root, generated), (await f.compile()).output[generated]);
-    const errors = typeDiagnostics(f.root);
+    const diagnostics = [];
+    const errors = typeDiagnostics(f.root, diagnostics);
     assert.equal(errors.length, 3, errors.join('\n'));
     assert.ok(errors.every((error) => error.includes('images/logo') && error.includes('consumer.ts')));
+    assert.deepEqual(
+        diagnostics.map((item) => item.message),
+        errors,
+    );
+    assert.deepEqual(
+        diagnostics.map((item) => item.line),
+        [2, 3, 4],
+    );
+    assert.ok(diagnostics.every((item) => /^TS\d+$/.test(item.code) && item.column > 0));
+    assert.ok(diagnostics.every((item) => item.file === 'assets/game/modules/shop/consumer.ts'));
 });
 
 test('图片自动选择 SpriteFrame，拒绝同 key 的扩展名与大小写冲突', async (t) => {

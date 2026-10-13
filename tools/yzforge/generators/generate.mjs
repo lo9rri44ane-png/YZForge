@@ -14,6 +14,7 @@ import { identityFile, scanCatalog, scriptDependencies } from '../project/catalo
 import { publicContracts } from './public-contracts.mjs';
 import { architectureCheck } from '../validation/architecture.mjs';
 import { typeDiagnostics } from '../validation/dependencies.mjs';
+import diagnosticTools from '../validation/diagnostics.cjs';
 import {
     digest,
     files,
@@ -27,6 +28,7 @@ import {
     pendingTransactions,
 } from '../project/project.mjs';
 register('../test-loader.mjs', import.meta.url);
+const { diagnostic, diagnosticsFromError, validationError } = diagnosticTools;
 const runtime = {
     ...(await import('../../../assets/framework/assets/catalog.ts')),
     ...(await import('../../../assets/framework/config/schema.ts')),
@@ -94,8 +96,9 @@ async function generateLocked(
     const settings = await json(resolve(root, 'project-settings/framework.json'));
     const appOptions = settingsTools.runtimeOptions(settings);
     const projectModules = (await modules(root)).map(localizationLayout.expandModule);
-    const issues = await lifecycleCheck(root);
-    if (issues.length) throw Error(issues.join('\n'));
+    const diagnostics = [];
+    const issues = await lifecycleCheck(root, diagnostics);
+    if (issues.length) throw validationError(issues.join('\n'), diagnostics);
     const meta = await metadata(root),
         registry = new Map(),
         output = {},
@@ -344,6 +347,7 @@ async function generateLocked(
     const validationErrors = await validateLocalizedBindings(root, meta, localization, projectModules, {
         forBuild: !!platform,
         collect: true,
+        diagnostics,
     });
     Object.assign(output, localization.output);
     await publicContracts(root, projectModules, output);
@@ -411,14 +415,32 @@ async function generateLocked(
             throw Error(`Obsolete generated file was manually changed; review before removal: ${path}`);
         obsolete.push(path);
     }
-    if (check && validationErrors.length) throw Error(validationErrors.join('\n'));
+    const obsoleteDiagnostics = obsolete.map((file) =>
+        diagnostic('YZ_GENERATED_OBSOLETE', `生成产物已过期：${file}`, {
+            file,
+            hint: '使用 Creator 工作台检查引用并归档旧生成文件。',
+            docs: 'docs/architecture.md',
+        }),
+    );
+    if (check && validationErrors.length) throw validationError(validationErrors.join('\n'), diagnostics);
     if (check && (differences.length || obsolete.length))
-        throw Error(
+        throw validationError(
             `Generated output is stale; use the workbench or npm run generate:\n${differences.join('\n')}\nObsolete files: ${obsolete.join(', ')}`,
+            [
+                ...differences.map((file) =>
+                    diagnostic('YZ_GENERATED_STALE', `生成产物与源声明不一致：${file}`, {
+                        file,
+                        hint: '通过工作台或 npm run generate 重新生成，然后重新检查。',
+                        docs: 'docs/development.md',
+                    }),
+                ),
+                ...obsoleteDiagnostics,
+            ],
         );
     if (!check && !preview && obsolete.length && !allowObsolete)
-        throw Error(
+        throw validationError(
             `Use the Creator workbench to inspect references and archive obsolete generated assets:\n${obsolete.join('\n')}`,
+            obsoleteDiagnostics,
         );
     const plannedOutput = {
         ...output,
@@ -439,14 +461,16 @@ async function generateLocked(
             await validate(root, projectModules);
         } catch (error) {
             validationErrors.push(error.message);
+            diagnostics.push(...diagnosticsFromError(error));
         }
     }
-    if (!preview) validationErrors.push(...typeDiagnostics(root));
-    if (check && validationErrors.length) throw Error(validationErrors.join('\n'));
+    if (!preview) validationErrors.push(...typeDiagnostics(root, diagnostics));
+    if (check && validationErrors.length) throw validationError(validationErrors.join('\n'), diagnostics);
     return {
         ...result,
         valid: validationErrors.length === 0,
         validationErrors,
+        diagnostics,
         obsolete,
         outputPaths: Object.keys(output),
         moduleCount: projectModules.length,

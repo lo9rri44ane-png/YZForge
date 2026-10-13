@@ -72,7 +72,14 @@ test('类型引用和转导出不能穿透私有边界，应用装配只允许 e
         module = { ...f.module, directory: f.directory };
     await f.put(prefix + '/code/Service.ts', 'export class Service {}');
     await f.put(prefix + '/contracts/api.ts', "export type { Service } from '../code/Service';");
-    await assert.rejects(codeBoundaryCheck(f.root, [module]), /包含类型引用/);
+    await assert.rejects(codeBoundaryCheck(f.root, [module]), (error) => {
+        assert.match(error.message, /包含类型引用/);
+        assert.equal(error.diagnostics[0].code, 'YZ_MODULE_BOUNDARY');
+        assert.equal(error.diagnostics[0].file, prefix + '/contracts/api.ts');
+        assert.equal(error.diagnostics[0].line, 1);
+        assert.equal(error.diagnostics[0].column, 1);
+        return true;
+    });
     await f.put(prefix + '/contracts/api.ts', 'export interface DemoApi {}');
     await f.put(prefix + '/public.ts', "export * from './contracts/api';");
     await f.put('assets/game/app/start.ts', "import type { DemoApi } from '../modules/demo/contracts/api';");
@@ -130,7 +137,16 @@ test('ViewModel cannot reach nodes or UI protocols through type imports or local
         "import type { Port } from './helper'; export type Model=Port;",
     );
     await f.put('assets/game/modules/demo/code/helper.ts', "export type Port=import('cc').Node;");
-    await assert.rejects(architectureCheck(f.root, [module]), /ViewModel 不能依赖/);
+    await assert.rejects(architectureCheck(f.root, [module]), (error) => {
+        assert.match(error.message, /ViewModel 不能依赖/);
+        const [diagnostic] = error.diagnostics;
+        assert.equal(diagnostic.code, 'YZ_VIEWMODEL_UI_DEPENDENCY');
+        assert.equal(diagnostic.file, 'assets/game/modules/demo/code/helper.ts');
+        assert.equal(diagnostic.line, 1);
+        assert.equal(diagnostic.column, 18);
+        assert.ok(diagnostic.hint && diagnostic.docs);
+        return true;
+    });
     await f.put('assets/framework/ui/view-session.ts', 'export interface Session {}');
     await f.put(
         'assets/game/modules/demo/code/helper.ts',
@@ -155,6 +171,47 @@ test('组件通过能力接口消费服务，纯类型引用也不能重新耦�
         "export type Service = import('../assets/asset-access').AssetAccess;",
     );
     await architectureCheck(f.root, []);
+});
+
+test('运行时边界诊断使用源文件位置，重复模块引用不猜测转译后的行号', async (t) => {
+    const f = await fixture(t);
+    const file = 'assets/framework/components/host.ts';
+    await f.put('assets/framework/ui/widget.ts', 'export class Widget {}');
+    await f.put(
+        file,
+        [
+            'export interface Removed {',
+            '    value: number;',
+            '}',
+            "import { Widget } from '../ui/widget';",
+            'export const widget = Widget;',
+        ].join('\n'),
+    );
+    await assert.rejects(architectureCheck(f.root, []), (error) => {
+        assert.match(error.message, /组件基础设施不能加载上层实现/);
+        const [diagnostic] = error.diagnostics;
+        assert.equal(diagnostic.code, 'YZ_COMPONENT_RUNTIME_IMPORT');
+        assert.equal(diagnostic.file, file);
+        assert.equal(diagnostic.line, 4);
+        assert.equal(diagnostic.column, 1);
+        return true;
+    });
+    await f.put(
+        file,
+        [
+            "import type { Widget as WidgetType } from '../ui/widget';",
+            "import { Widget } from '../ui/widget';",
+            'export const widget: WidgetType = new Widget();',
+        ].join('\n'),
+    );
+    await assert.rejects(architectureCheck(f.root, []), (error) => {
+        const [diagnostic] = error.diagnostics;
+        assert.equal(diagnostic.code, 'YZ_COMPONENT_RUNTIME_IMPORT');
+        assert.equal(diagnostic.file, file);
+        assert.equal(Object.hasOwn(diagnostic, 'line'), false);
+        assert.equal(Object.hasOwn(diagnostic, 'column'), false);
+        return true;
+    });
 });
 
 test('内联类型、typeof import、import equals 和静态模板导入遵守相同边界', async (t) => {

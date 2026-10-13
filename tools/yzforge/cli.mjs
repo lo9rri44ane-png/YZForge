@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { generate } from './generators/generate.mjs';
+import diagnosticTools from './validation/diagnostics.cjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 try {
     const command = process.argv[2] ?? 'check';
@@ -49,6 +50,17 @@ try {
     // 编辑器须先刷新已写出的 Key，再显示使用方错误；命令行仍以非零状态阻止流水线。
     if (!ok && !process.argv.includes('--editor') && command !== 'preview') process.exitCode = 1;
 } catch (error) {
-    console.error(JSON.stringify({ ok: false, code: error.code, message: error.message }, null, 2));
+    console.error(
+        JSON.stringify(
+            {
+                ok: false,
+                code: error.code,
+                message: error.message,
+                diagnostics: diagnosticTools.diagnosticsFromError(error),
+            },
+            null,
+            2,
+        ),
+    );
     process.exitCode = 1;
 }

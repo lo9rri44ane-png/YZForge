@@ -4,6 +4,8 @@
 
 可以直接复制本项目开始开发。项目自带可运行的示例，也支持清理示例后从空框架开始。
 
+AI 协作入口见 [AGENTS.md](AGENTS.md)，按任务查找契约、现有工具与验证命令。
+
 ## 功能
 
 | 功能           | 说明                                                                                                     |
@@ -41,7 +43,7 @@
 4. 确认项目扩展 `yzforge-editor` 已启用，打开 **YZForge → 项目工作台**。
 5. 打开 [Bootstrap.scene](assets/game/boot/Bootstrap.scene)，运行预览。
 
-预览首先进入“功能实验室”。建议先体验“正式业务流程 · 任务奖励”，再打开工作台的“示例工作流”，对照 Service、Presenter、Page 和 Part 的真实代码。其他入口展示 UI、资源、配置、时间、音频、存档与失败恢复。
+预览首先进入“功能实验室”。建议先体验“正式业务流程 · 任务奖励”，再打开工作台的“示例工作流”，对照 Service、ViewModel、Page 和 Part 的真实代码。其他入口展示 UI、资源、配置、时间、音频、存档与失败恢复。
 
 - [目录与依赖规则](docs/architecture.md)：模块布局、公开入口、文件所有权和工具职责。
 - [正式开发工作流](docs/development-workflow.md)：从创建模块到业务、渲染、绑定和验证。
@@ -82,7 +84,7 @@ assets/game/modules/inventory/
 ├─ contracts/                    # 人工 api.ts、公开界面类型及 generated/ 合同
 ├─ code/
 │  ├─ InventoryModule.ts         # 模块服务装配
-│  ├─ ui/                        # 每个界面独立目录，含 Presenter 与 generated/Binding
+│  ├─ ui/                        # 每个界面独立目录，按需含 ViewModel 与 generated/Binding
 │  ├─ components/                # 每个 Part 或普通组件独立目录
 │  ├─ services/                  # 业务服务
 │  └─ generated/                 # 依赖引用和私有配置类型
@@ -111,7 +113,7 @@ assets/game/modules/inventory/
 
 原生前缀会识别实际挂载的项目子类；普通业务组件用 `comp_`。生成后可直接调用 `this.btnSubmit.run(...)`、`this.compState.updateCheck(1)`。多个匹配组件按 Inspector 顺序取第一个，详见[自动绑定文档](docs/auto-binding.md)。
 
-界面脚本负责渲染和输入；复杂的显示流程可以交给 Presenter，多个界面共享的业务状态放在模块 Service。UI 之间通过打开参数、返回结果或事件通信。
+界面脚本负责渲染和输入；复杂的显示流程可以交给 ViewModel，多个界面共享的业务状态放在模块 Service。UI 之间通过打开参数、返回结果或事件通信。
 
 继承框架基类的业务脚本使用 `onShow`、`onHide`、`onActivate`、`onTick` 等框架生命周期，保留引擎 `onLoad`、`start`、`update` 等入口给框架使用。
 
@@ -185,7 +187,7 @@ assets/game/modules/inventory/
 | ----------------------------------------------- | ------------------------------------------------ |
 | [复制项目与清理示例](docs/copy-project.md)      | 复制清单、项目标识、清理示例和接入自己的业务     |
 | [开发环境与代码规范](docs/development.md)       | VS Code、ESLint、Prettier、类型检查和调试        |
-| [正式开发工作流](docs/development-workflow.md)  | 从模块、Service、Presenter 到 Page / Part        |
+| [正式开发工作流](docs/development-workflow.md)  | 从模块、Service、ViewModel 到 Page / Part        |
 | [API 使用指南](docs/api-guide.md)               | 生命周期、资源、配置、UI、模块通信、时间和存档   |
 | [XLSX 配置表制作](docs/config-tables.md)        | 字段、枚举、导出规则、分片、公式与生成物         |
 | [自动绑定](docs/auto-binding.md)                | 节点命名、实际组件类型、生成和排错               |

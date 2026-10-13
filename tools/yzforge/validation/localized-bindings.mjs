@@ -2,6 +2,9 @@ import { relative, resolve, isAbsolute } from 'node:path';
 import { json } from '../project/project.mjs';
 import { decodeUuid } from '../project/catalog.mjs';
 import layout from '../project/localization-layout.cjs';
+import diagnosticTools from './diagnostics.cjs';
+
+const { diagnostic, validationError } = diagnosticTools;
 
 /** 与运行时一致：最近源预制体优先，普通场景回退文件归属。 */
 export function localizedNamespace(records, component, namespace = '', sources = {}) {
@@ -167,7 +170,7 @@ export async function validateLocalizedBindings(
     metadata,
     localization,
     modules = [],
-    { forBuild = false, collect = false } = {},
+    { forBuild = false, collect = false, diagnostics = [] } = {},
 ) {
     const errors = [];
     const classes = new Map([
@@ -228,9 +231,17 @@ export async function validateLocalizedBindings(
             if (forBuild && !languageOf(asset.source))
                 validateDefaultLanguageReferences(records, languageAssets, localization.release?.defaultLocale);
         } catch (error) {
-            errors.push(`${relative(root, asset.source)}: ${error.message}`);
+            const message = `${relative(root, asset.source)}: ${error.message}`;
+            errors.push(message);
+            diagnostics.push(
+                diagnostic('YZ_LOCALIZED_BINDING', message, {
+                    root,
+                    file: asset.source,
+                    docs: 'docs/localization.md',
+                }),
+            );
         }
     }
-    if (errors.length && !collect) throw Error(errors.join('\n'));
+    if (errors.length && !collect) throw validationError(errors.join('\n'), diagnostics);
     return errors;
 }
