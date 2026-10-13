@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 const groups = {
     presentation: {
         description: '状态绑定、首屏/清理屏障、组件准备顺序、双皮肤与缓存重开；需 workshop 示例',
-        files: ['verify-presentation.mjs'],
+        files: ['verify-presentation.mjs', 'verify-composition.mjs'],
     },
     ui: {
         description: '弹窗排序/真实输入、生命周期/缓存/动态组件、异常清理；需展示模块',

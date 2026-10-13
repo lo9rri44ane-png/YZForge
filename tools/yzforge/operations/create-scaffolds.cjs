@@ -231,7 +231,7 @@ export class ${className} extends ${className}Binding {
         const model = show.session.use(create${className}Model);
         show.bindings.watch(model.state, state => state, state => this.render(state));
         model.start();
-        // 同步输入用 show.listen；异步操作用 show.bindings.command，交互端口随每次调用传入。
+        // 同步输入用 show.bindings.listen；异步操作用 command；子区域用 part/items/list。
     }
     /** 只同步更新节点。按区域选择状态，避免余额变化重建整张列表。 */
     private render(_state: ${className}State): void { /* 使用自动绑定的节点。 */ }
@@ -301,10 +301,30 @@ export class ${className} extends ${className}Binding {
             ? await resolveBindingFields(await p.inspectPrefab(args.prefabUUID, settings.bindingPrefixes), generated)
             : [];
         await writeScript('create-asset', binding, bindingSource(manifest.id, className, fields, generated, true));
+        const presentation = path.relative(code, inside('assets/framework/ui/part-presentation')).replaceAll('\\', '/');
         await writeScript(
             'create-asset',
             path.join(code, `${className}.ts`),
-            `import { _decorator } from 'cc';\nimport { ${className}Binding } from './generated/${className}Binding';\nconst { ccclass } = _decorator;\n/** 可组合的预制体部件；节点由 Binding 自动绑定，使用父对象传入的数据和回调，不进入 UI 页面栈。 */\n@ccclass('${manifest.id}.${className}')\nexport class ${className} extends ${className}Binding {\n    /** 绑定和宿主上下文就绪后同步执行一次，适合初始化部件自身状态。 */\n    protected onInit(): void {}\n    // 按需重写 onActivate/onDeactivate/onDispose；异步任务放在 activation.run。\n    // 动态实例使用 ctx.assets.in(owner).instantiate，并由 owner 管理生命周期。\n}\n`,
+            `import { _decorator } from 'cc';
+import type { PartContext } from '${presentation}';
+import { ${className}Binding } from './generated/${className}Binding';
+const { ccclass } = _decorator;
+/** 父级提供的纯展示数据，按业务需要补充字段。 */
+export interface ${className}Data { readonly id: string; }
+/** 单个区域、普通集合和虚拟列表共用的 Part，不进入页面栈。 */
+@ccclass('${manifest.id}.${className}')
+export class ${className} extends ${className}Binding {
+    /** 每次业务身份绑定调用一次，同 ID 的更新由 item.state 推送。 */
+    bind(item: PartContext<${className}Data>): void {
+        item.bindings.watch(item.state, state => state.data, data => this.render(data));
+        // 文本/按钮用 item.bindings.text/command；异步资源用 prepare/present。
+        // 父级用 show.bindings.part/items/list 组合，订阅和资源随条目自动回收。
+    }
+    /** 同步更新节点；Part 不持有 Service 或其他页面。 */
+    private render(_data: ${className}Data): void {}
+    // 静态部件可在 onActivate 中使用 activation.bindings，帧逻辑使用 onTick。
+}
+`,
         );
         await waitClass(`${manifest.id}.${className}`);
         let info;

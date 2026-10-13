@@ -36,33 +36,32 @@ node_list                    ScrollView + VirtualList + UITransform
 在工作台创建业务 Part，按 `lbl_title`、`spr_icon`、`btn_select` 等命名节点并更新绑定。业务类继承生成的 Binding，继续使用 `onInit` / `onActivate` / `onDeactivate`，不覆盖 Cocos 保留生命周期。
 
 ```ts
-import {
-    VirtualList,
-    type VirtualListHandle,
-    type VirtualListItemContext,
-} from '../../../../../framework/ui/components/virtual-list';
+import { VirtualList } from '../../../../../framework/ui/components/virtual-list';
+import type { PartContext } from '../../../../../framework/ui/part-presentation';
 
 interface Row { readonly id: number; readonly title: string }
 
-// 放在页面 onShow 内；nodeList 是页面自动绑定的 node_list。
-const list: VirtualListHandle<Row> = this.nodeList.getComponent(VirtualList)!.mount<Row, InventoryItemPart>({
-    owner: show.scope,
-    assets: show.assets,
+// model.rows 是 ReadonlyState<readonly Row[]>，数据只有这一处来源。
+const list = show.bindings.list(this.nodeList.getComponent(VirtualList)!, model.rows, rows => rows, {
+    key: row => row.id,
     prefab: InventoryRes.prefab.prefabsInventoryItemPart,
     part: InventoryItemPart,
     layout: { itemWidth: 600, itemHeight: 88, spacingY: 8, overscanRows: 1 },
-    render: (part, item) => part.render(item),
+    bind: (part, item) => part.bind(item),
 });
-list.setItems(rows);
-list.scrollToIndex(99, 'center', 0.25);
+if (list.count > 99) list.scrollToIndex(99, 'center', 0.25);
 
 // InventoryItemPart extends InventoryItemPartBinding
-render(item: VirtualListItemContext<Row>): void {
-    this.lblTitle.string = item.data.title;
+bind(item: PartContext<Row>): void {
+    item.bindings.text(this.lblTitle, item.state, state => state.data.title);
 }
 ```
 
-`assets` 使用当前业务上下文的 `AssetAccess` 能力接口，内部按每个复用实例创建子期限，用现有 `instantiate({ active: false })` / `activate` 接通宿主、自动绑定和 Part 生命周期。不要自行调用底层 `cc.instantiate` 或在框架目录存放业务预制体。
+`show.bindings.list` 自动继承当前资源入口和输入规则，当前窗口参与页面首绘屏障。`required: false` 表示可选区域，配合 `onError` 提供本区反馈。返回的 `BoundVirtualList` 只控制布局、滚动、重试和关闭；修改数据应更新源状态。
+
+需要命令式数据入口时，使用 `VirtualList.mount({ owner, assets, key, prefab, part, layout, bind })`，返回带 `setItems/updateItem` 的 `VirtualListHandle`；调用方应等待 `handle.ready`。两种入口共用同一实现和 `PartContext<T>`，每次挂载选择一种数据来源。
+
+`bind` 每次业务身份绑定只调用一次，必须同步注册绑定；异步图片和内容使用 `item.bindings.prepare/present`。候选节点在隐藏且禁止受管输入的区域准备，先等待绑定，再通过 `assets.prepareInstance` 按原生控件、业务组件顺序准备，全部成功才放入 Content。框架拥有预制体和条目资源，不要自行销毁池中节点。
 
 ## 布局参数
 
@@ -93,16 +92,17 @@ list.setLayout({
 
 ## 数据、局部刷新与定位
 
-| API                                                              | 行为                                                                              |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `setItems(items, resetScroll = false)`                           | 复制数组并替换数据；重新绑定当前窗口，默认保留像素偏移并夹紧范围；传 true 回顶部  |
-| `updateItem(index, data)`                                        | 替换单个模型并刷新对应绑定，其余条目保持上下文                                    |
-| `refresh(indices?)`                                              | 指定索引去重后刷新；省略则刷新窗口内全部；离屏条目进入时读取数据                  |
-| `setLayout(layout)`                                              | 校验后更新固定布局；仍可见的条目只重新排布，数据未变化时不重绑                    |
-| `scrollToIndex(index, alignment = 'start', durationSeconds = 0)` | 立即或动画滚动，单位秒；不返回动画完成屏障                                        |
-| `whenIdle()`                                                     | 等待当下及其后续加载、渲染、回收；不等待滚动动画与仍在显示的 item.run             |
-| `inspect()`                                                      | `count`、左闭右开 `range`、实例数 `slots`、操作数 `pending`、已分配索引 `indices` |
-| `dispose()`                                                      | 立即取消并隐藏，返回完整清理 Promise；重复调用安全                                |
+| API                                                              | 行为                                                                                 |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `setItems(items, resetScroll = false)`                           | 校验唯一 Key 后替换数据；仍可见的相同 Key 保留绑定，默认保留像素偏移；传 true 回顶部 |
+| `updateItem(index, data)`                                        | 替换单个模型；相同 Key 推送 item.state，不同 Key 完整结束旧绑定                      |
+| `refresh(indices?)`                                              | 显式结束并重建指定绑定，用于完整重试；普通更新使用源状态或 updateItem                |
+| `setLayout(layout)`                                              | 校验后更新固定布局；仍可见的条目只重新排布，数据未变化时不重绑                       |
+| `scrollToIndex(index, alignment = 'start', durationSeconds = 0)` | 立即或动画滚动，单位秒；不返回动画完成屏障                                           |
+| `ready`                                                          | 等待当前窗口最新必需内容，包含同 ID 的资源更新；失败立即拒绝，取消立即结束等待       |
+| `whenIdle()`                                                     | 等待实例加载、身份绑定与回收调度；同 ID 资源更新用 ready，不等待滚动动画与 item.run  |
+| `inspect()`                                                      | `count`、左闭右开 `range`、实例数 `slots`、操作数 `pending`、已分配索引 `indices`    |
+| `dispose()`                                                      | 立即取消并隐藏，返回完整清理 Promise；重复调用安全                                   |
 
 `start` 对齐顶部，`center` 居中，`end` 对齐底部，`nearest` 只在未完整可见时移动最短距离。目标条目比视口更高且已覆盖视口时，nearest 保持位置。所有定位均夹紧合法边界；空列表及越界索引会抛出 `VIRTUAL_LIST_INDEX`，调用前可检查 `list.count`。
 
@@ -114,7 +114,7 @@ if (list.count) list.scrollToIndex(list.count - 1, 'end');
 await list.whenIdle();
 ```
 
-数组被浅复制：修改原数组的结构不会改变列表；追加、删除、排序用 setItems，替换元素用 updateItem。对象本身不深复制，原地修改对象后须 refresh。列表按索引调度，不保留业务选中状态、不提供稳定 Key 差量更新；业务身份使用 `item.data.id`，不能把 `item.index` 当永久 ID。
+以上数据修改方法仅属于命令式 mount 句柄。数组结构被复制；业务数据应使用新的不可变值。当前条目向 Part 提供冻结的 `item.state`，包含 `data` 和 `index`。`item.key` 是稳定身份，索引只表示位置；唯一性在修改前整体验证，重复 Key 抛 `ITEM_KEY_DUPLICATE` 并保留原列表。更新同一 Key 的标题、数量或位置不会重新 bind；换成另一个 Key、滚出窗口或显式 refresh 才结束旧绑定。选择、编辑草稿和需跨滚动保留的操作由外部模型持有。
 
 ## 每次复用的生命周期
 
@@ -128,55 +128,39 @@ flowchart TD
     Binding --> Work[订阅 / 资源 / item.run]
 ```
 
-一次实例可能绑定许多不同数据。滚出、局部刷新或替换数据时：
+一次实例可能绑定许多不同业务身份。滚出、显式 refresh 或替换为不同 Key 时：
 
 1. 同步取消旧 item.scope，使旧 commit 失效，解绑响应取消信号的订阅。
 2. 同步禁止 Part 再激活并隐藏节点，调用现有失活流程。
 3. 等待旧绑定任务、Part 激活任务及清理回调全部完成。
-4. 为节点创建新 item.scope，渲染新数据，完成后激活 Part。
+4. 为节点创建新 item.scope，注册数据绑定并等待必需内容、原生和业务组件准备；成功后交接。
 
 实例数量受视口容量约束，容量按 `ceil(视口高度 / 行步长) + 1 + 2 × 预备行数` 乘列数估算，并受数据总数限制。容量缩小时，超额实例会在旧工作退出后销毁。加载中快速滚动只保留最新窗口，不会积累滚动请求队列。旧任务迟迟不退出时可能暂时留空；框架不会无限创建补位节点，也不会强行终止任意 Promise。
 
 Part 的 `onInit` 每个实例一次，`onActivate` / `onDeactivate` 随复用反复执行。与当前数据关联的订阅和异步操作放在 item.scope；Part 自身激活期逻辑可继续用 activation.scope。不要将条目数据资源放在页面或模块的长期 Scope 中。
 
 ```ts
-render(item: VirtualListItemContext<Row>): void {
-    // 每次必须完整重置，避免复用时残留旧颜色、按钮状态和图片。
-    this.lblTitle.string = item.data.title;
-    this.lblDetail.string = '加载中…';
+bind(item: PartContext<Row>): void {
+    item.bindings.text(this.lblTitle, item.state, state => state.data.title);
+    item.bindings.listen(this.btnSelect.node, Button.EventType.CLICK,
+        () => select(item.key));
 
-    this.ctx.events.on(ItemChanged, (event, task) => {
-        if (event.id === item.data.id) task.commit(() => this.lblDetail.string = event.text);
-    }, item.scope);
-
-    void item.run(async task => {
-        const detail = await service.loadDetail(item.data.id, task.signal);
-        task.commit(() => { this.lblDetail.string = detail.text; });
-    }).catch(error => {
-        if (!(error instanceof OperationCancelled)) reportError(error);
+    item.bindings.prepare(item.state, state => state.data.icon, {
+        prepare: (icon, stage) => item.assets.in(stage.scope).load(icon),
+        render: frame => { this.sprIcon.spriteFrame = frame; },
+        writes: [[this.sprIcon, 'spriteFrame']],
+        onError: error => showIconFailure(error),
     });
-
-    // 图片持有也跟随本次绑定，避免旧图在回收后继续占用资源。
-    void item.run(() => this.ctx.assets.in(item.scope).setSprite(this.sprIcon, item.data.icon))
-        .catch(error => { if (!(error instanceof OperationCancelled)) reportError(error); });
 }
 ```
 
-上述为模式片段，`ItemChanged`、`service`、带 icon 字段的 Row 由业务定义。始终捕获本次 item/task，在 await 后使用它的 commit；不要在 await 后读取已被下一次 render 覆盖的 `this.currentItem`。`commit` 仅接受同步回调。
+上述为模式片段，带 icon 字段的 Row、select 和错误反馈由业务提供。一次性长任务可以使用 item.run，但同 ID 数据更新不会自动取消它；需随参数重新准备的显示内容使用 prepare。涉及对象身份和按钮参数一起替换时，使用 present 返回的已显示状态；详细规则见[开发工作流](development-workflow.md#渲染属性所有权和资源)。
 
-节点事件使用取消信号即时解绑；仅 `scope.defer` 的回调需要等登记任务排空后才执行：
-
-```ts
-const onClick = () => item.commit(() => select(item.data.id));
-this.btnSelect.node.on(Button.EventType.CLICK, onClick);
-item.signal.onAbort(() => this.btnSelect.node.off(Button.EventType.CLICK, onClick));
-```
-
-列表禁用、节点销毁或父 Scope 结束都会取消会话。重新显示时重新 mount；同一组件必须等旧 handle.dispose 完成后才能再次 mount。不要在 render / item.run / Part 激活任务中 await 自己列表的 dispose，也不要从这些工作中等待依赖自身退出的 whenIdle，以免形成自等待。
+列表禁用、节点销毁或父 Scope 结束都会取消会话。重新显示时重新 mount；同一组件必须等旧 handle.dispose 完成后才能再次 mount。不要在 bind / item.run / Part 激活任务中 await 自己列表的 dispose，也不要从这些工作中等待依赖自身退出的 whenIdle，以免形成自等待。
 
 ## 错误与验证
 
-布局、时长、索引错误使用 `VIRTUAL_LIST_LAYOUT`、`VIRTUAL_LIST_DURATION`、`VIRTUAL_LIST_INDEX` 等明确错误码；结构或布局冲突为 `VIRTUAL_LIST_SETUP`。加载/渲染失败由 onError 上报，失败项隐藏且不会每帧无限重试，调用 refresh 或让它重新进入窗口可重试。onError 是同步上报器，不应抛错。清理失败的节点会被销毁而不会返回可复用池；Part 的同步 `onDeactivate` 异常也适用。关闭期间发生的清理失败会在其余实例释放后，使 `dispose()` 或父级 `close()` 以 `SCOPE_CLEANUP_FAILED` 拒绝；正常刷新时已上报并处理完的失败不会影响以后正常关闭。
+布局、时长、索引错误使用 `VIRTUAL_LIST_LAYOUT`、`VIRTUAL_LIST_DURATION`、`VIRTUAL_LIST_INDEX` 等明确错误码；结构或布局冲突为 `VIRTUAL_LIST_SETUP`。首次加载/绑定失败立即拒绝 ready 并由 onError 上报，失败项隐藏且不会每帧无限重试，调用 refresh 或让它重新进入窗口可重试。onError 是同步上报器，不应抛错。清理失败的节点会被销毁而不会返回可复用池；Part 的同步 `onDeactivate` 异常也适用。关闭期间发生的清理失败会在其余实例释放后，使 `dispose()` 或父级 `close()` 以 `SCOPE_CLEANUP_FAILED` 拒绝；正常刷新时已上报并处理完的失败不会影响以后正常关闭。
 
 ```powershell
 npm run verify
@@ -185,6 +169,6 @@ npm run test:showcase
 node tests/integration/verify-virtual-list.mjs http://127.0.0.1:7456/
 ```
 
-单元测试覆盖布局、边界、十万条数据、局部刷新、订阅解绑、任务与 Part 清理屏障、加载失败/迟到、关闭和视口变化。类型合同验证数据类型与借用 Lifetime。集成测试使用实际 Cocos 引擎、ScrollView、自动绑定 Part 和资源管理器，验证网格、动画定位、子 Widget 尺寸、快速跳转、清空、禁用、重新挂载及返回再进入；截图保存在 `temp/mcp-captures/virtual-list-*.png`。
+单元测试覆盖稳定 Key、同 ID 数据更新、重排、ready 故障交付、布局、边界、十万条数据、显式刷新、订阅解绑、任务与 Part 清理屏障、加载失败/迟到、关闭和视口变化。类型合同验证数据类型与借用 Lifetime。集成测试使用实际 Cocos 引擎、ScrollView、自动绑定 Part 和资源管理器，验证网格、动画定位、子 Widget 尺寸、快速跳转、清空、禁用、重新挂载及返回再进入；截图保存在 `temp/mcp-captures/virtual-list-*.png`。
 
 当前范围为固定尺寸纵向滚动，不包含变高条目、横向虚拟化、无限循环、分页取数、多种条目预制体和拖拽排序。Web 预览验证不代表微信或原生真机性能验收。ScrollView 偏移和定位接口依据 [Cocos 3.8 官方 API](https://docs.cocos.com/creator/3.8/api/zh/class/ScrollView)。

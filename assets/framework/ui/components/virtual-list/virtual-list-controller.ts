@@ -1,25 +1,13 @@
 import { type ErrorReporter, FrameworkError, invariant, OperationCancelled, reportError } from '../../../core/errors';
-import { type Lifetime, runTask, Scope, type TaskContext, taskContext } from '../../../core/scope';
+import { type Lifetime, runTask, Scope } from '../../../core/scope';
+import { untilCancelled } from '../../../core/cancellation';
+import { ItemBinding, itemKeys, type ItemContext, type ItemKey } from '../../item-binding';
 import {
     FixedVirtualLayout,
     type VirtualListAlignment,
     type VirtualListLayout,
     type VirtualListRange,
 } from './virtual-list-layout';
-
-/** 条目的一次数据绑定。复用、刷新、移出窗口或列表关闭都会使旧上下文失效。 */
-export interface VirtualListItemContext<T> extends TaskContext {
-    /** 本次绑定的零基索引；不能保存为条目永久身份。 */
-    readonly index: number;
-    /** 本次数据引用；框架不会深复制，建议传入不可变业务模型。 */
-    readonly data: T;
-    /**
-     * 登记异步工作；复用会等待其退出，await 后用本次 task.commit 更新节点。
-     * @param work 接收本次绑定的任务上下文；应响应 signal，调用方必须处理拒绝。
-     * @returns 业务任务的结果。
-     */
-    run<R>(work: (task: TaskContext) => R | Promise<R>): Promise<R>;
-}
 
 /** 只读诊断，不持有节点和业务数据。 */
 export interface VirtualListSnapshot {
@@ -39,17 +27,20 @@ export interface VirtualListSnapshot {
 export interface VirtualListAdapter<T, Item> {
     create(owner: Lifetime): Promise<Item>;
     place(item: Item, index: number, layout: FixedVirtualLayout): void;
-    render(item: Item, context: VirtualListItemContext<T>): void | Promise<void>;
+    bind(item: Item, context: ItemContext<T>): void | Promise<void>;
+    /** 同 ID 数据更新也可能产生新的必需准备。 */
+    ready?(item: Item): Promise<void>;
     activate(item: Item): void;
     /** 必须同步隐藏并禁止新激活，返回旧 Part 工作的退出屏障。 */
     deactivate(item: Item): Promise<void>;
 }
-type Request<T> = { index: number; data: T };
+type Request<T> = { key: ItemKey; index: number; data: T };
 type Slot<T, Item> = {
     scope: Scope;
     item?: Item;
     request?: Request<T>;
-    binding?: Scope;
+    binding?: ItemBinding<T>;
+    prepared?: boolean;
     state: 'idle' | 'loading' | 'bound' | 'draining' | 'destroying';
 };
 
@@ -60,20 +51,24 @@ export class VirtualListController<T, Item> {
     readonly scope: Scope;
     layout: FixedVirtualLayout;
     private data: readonly T[] = [];
+    private keys: ItemKey[] = [];
     private viewport = 0;
     private offset = 0;
-    private requests = new Map<number, Request<T>>();
-    private readonly failed = new Set<Request<T>>();
+    private requests = new Map<ItemKey, Request<T>>();
+    private readonly failed = new Map<Request<T>, unknown>();
+    private readonly waiters = new Set<() => void>();
     private readonly slots = new Set<Slot<T, Item>>();
     private readonly pending = new Set<Promise<void>>();
     private readonly closingFailures: unknown[] = [];
     private pumping = false;
     private again = false;
+    private revision = 0;
 
     constructor(
         owner: Lifetime,
         layout: VirtualListLayout,
         private readonly adapter: VirtualListAdapter<T, Item>,
+        private readonly key: (data: T) => ItemKey,
         private readonly report: ErrorReporter = reportError,
     ) {
         this.layout = new FixedVirtualLayout(layout);
@@ -81,6 +76,7 @@ export class VirtualListController<T, Item> {
         this.scope.signal.onAbort(() => {
             this.requests.clear();
             for (const slot of this.slots) this.retire(slot);
+            this.changed();
         });
         this.scope.defer(async () => {
             await this.whenIdle();
@@ -93,8 +89,9 @@ export class VirtualListController<T, Item> {
     }
     setItems(items: readonly T[]): void {
         this.scope.signal.throwIfAborted();
+        const keys = itemKeys(items, this.key);
         this.data = items.slice();
-        this.requests.clear();
+        this.keys = keys;
         this.updateRequests();
     }
     setLayout(layout: VirtualListLayout): void {
@@ -119,15 +116,16 @@ export class VirtualListController<T, Item> {
         else {
             const checked = Array.from(indices);
             for (const index of checked) this.checkIndex(index);
-            for (const index of checked) this.requests.delete(index);
+            for (const index of checked) this.requests.delete(this.keys[index]);
         }
         this.updateRequests();
     }
     updateItem(index: number, data: T): void {
         this.scope.signal.throwIfAborted();
         this.checkIndex(index);
-        (this.data as T[])[index] = data;
-        this.refresh([index]);
+        const next = this.data.slice();
+        next[index] = data;
+        this.setItems(next);
     }
     get count(): number {
         return this.data.length;
@@ -164,8 +162,56 @@ export class VirtualListController<T, Item> {
     async whenIdle(): Promise<void> {
         while (this.pending.size) await Promise.all(Array.from(this.pending));
     }
+    /** 当前窗口最新必需内容就绪；渲染失败立即拒绝，不等待失败后的物理清理。 */
+    async ready(): Promise<void> {
+        for (;;) {
+            this.scope.signal.throwIfAborted();
+            for (const [request, error] of this.failed) if (this.current(request)) throw error;
+            if (
+                Array.from(this.requests.values()).every((request) =>
+                    Array.from(this.slots).some((slot) => slot.request === request && slot.prepared),
+                )
+            ) {
+                const revision = this.revision;
+                try {
+                    const ready = this.adapter.ready;
+                    if (ready)
+                        await untilCancelled(
+                            Promise.all(
+                                Array.from(this.slots)
+                                    .filter((slot) => slot.prepared)
+                                    .map((slot) => ready(slot.item!)),
+                            ),
+                            this.scope.signal,
+                        );
+                } catch (error) {
+                    if (revision === this.revision) throw error;
+                }
+                this.scope.signal.throwIfAborted();
+                if (revision === this.revision) return;
+                continue;
+            }
+            let resume!: () => void;
+            const changed = new Promise<void>((resolve) => {
+                resume = resolve;
+            });
+            this.waiters.add(resume);
+            try {
+                await untilCancelled(changed, this.scope.signal);
+            } finally {
+                this.waiters.delete(resume);
+            }
+        }
+    }
     dispose(): Promise<void> {
         return this.scope.close();
+    }
+    /** @internal 已显示条目的同步绑定故障，停用并等待明确重试。 */
+    failBinding(context: ItemContext<T>, error: unknown): void {
+        const slot = Array.from(this.slots).find((slot) => slot.binding?.context === context);
+        if (!slot?.request) return;
+        this.fail(slot.request, error);
+        this.retire(slot);
     }
     private checkIndex(index: number): void {
         invariant(
@@ -177,15 +223,21 @@ export class VirtualListController<T, Item> {
     private updateRequests(): void {
         this.offset = this.scrollOffset;
         const range = this.layout.range(this.count, this.viewport, this.offset);
-        const next = new Map<number, Request<T>>();
-        for (let index = range.start; index < range.end; index++)
-            next.set(index, this.requests.get(index) ?? { index, data: this.data[index] });
+        const next = new Map<ItemKey, Request<T>>();
+        for (let index = range.start; index < range.end; index++) {
+            const key = this.keys[index];
+            const request = this.requests.get(key) ?? { key, index, data: this.data[index] };
+            request.index = index;
+            request.data = this.data[index];
+            next.set(key, request);
+        }
         this.requests = next;
-        for (const request of this.failed) if (next.get(request.index) !== request) this.failed.delete(request);
+        for (const request of this.failed.keys()) if (next.get(request.key) !== request) this.failed.delete(request);
         this.pump();
+        this.changed();
     }
     private current(request: Request<T>): boolean {
-        return !this.scope.signal.aborted && this.requests.get(request.index) === request;
+        return !this.scope.signal.aborted && this.requests.get(request.key) === request;
     }
     private pump(): void {
         if (this.scope.signal.aborted) return;
@@ -220,7 +272,11 @@ export class VirtualListController<T, Item> {
                     else this.bind(slot, request);
                 }
                 for (const slot of this.slots)
-                    if (slot.state === 'bound') this.adapter.place(slot.item!, slot.request!.index, this.layout);
+                    if (slot.state === 'bound') {
+                        slot.binding!.update(slot.request!.data, slot.request!.index);
+                        if (slot.request && slot.state === 'bound')
+                            this.adapter.place(slot.item!, slot.request.index, this.layout);
+                    }
             } while (this.again && !this.scope.signal.aborted);
         } finally {
             this.pumping = false;
@@ -245,24 +301,22 @@ export class VirtualListController<T, Item> {
         );
     }
     private bind(slot: Slot<T, Item>, request: Request<T>): void {
-        const binding = slot.scope.child(`item:${request.index}`);
+        const current = (): boolean => slot.binding === binding && this.current(request);
+        const binding: ItemBinding<T> = new ItemBinding(slot.scope, request.key, request.data, request.index, current);
         slot.binding = binding;
         slot.state = 'bound';
-        const current = () => slot.binding === binding && this.current(request);
-        const context: VirtualListItemContext<T> = Object.freeze({
-            ...taskContext(binding, current),
-            index: request.index,
-            data: request.data,
-            run: <R>(work: (task: TaskContext) => R | Promise<R>) =>
-                runTask(binding, work, current, 'virtual-list:item'),
-        });
+        slot.prepared = false;
+        const context = binding.context;
         this.watch(
             runTask(
-                binding,
+                binding.scope,
                 async () => {
                     this.adapter.place(slot.item!, request.index, this.layout);
-                    await this.adapter.render(slot.item!, context);
-                    context.commit(() => this.adapter.activate(slot.item!));
+                    await this.adapter.bind(slot.item!, context);
+                    context.commit(() => {
+                        this.adapter.activate(slot.item!);
+                        slot.prepared = true;
+                    });
                 },
                 current,
                 'virtual-list:render',
@@ -276,6 +330,7 @@ export class VirtualListController<T, Item> {
         slot.request = undefined;
         if (slot.state !== 'bound') return;
         slot.state = 'draining';
+        slot.prepared = false;
         const binding = slot.binding!;
         slot.binding = undefined;
         // 先登记到实例父 Scope，再发取消。父级关闭时须等待异步清理完成，
@@ -286,14 +341,14 @@ export class VirtualListController<T, Item> {
             release = resolve;
         });
         this.watch(slot.scope.track(barrier, 'virtual-list:retire'));
-        binding.cancel();
+        binding.scope.cancel();
         let deactivation: Promise<void>;
         try {
             deactivation = this.adapter.deactivate(slot.item!);
         } catch (error) {
             deactivation = Promise.reject(error);
         }
-        void Promise.allSettled([binding.close(), deactivation])
+        void Promise.allSettled([binding.scope.close(), deactivation])
             .then((results) => {
                 const failures = results.filter((result) => result.status === 'rejected');
                 if (failures.length) {
@@ -324,14 +379,21 @@ export class VirtualListController<T, Item> {
         if (this.scope.signal.aborted) this.closingFailures.push(error);
     }
     private fail(request: Request<T>, error: unknown): void {
-        if (this.current(request)) this.failed.add(request);
+        if (this.current(request)) this.failed.set(request, error);
+        this.changed();
         if (!(error instanceof OperationCancelled)) this.report(error);
     }
     private watch(work: Promise<void>): void {
         const pending = work.catch(this.report).then(() => {
             this.pending.delete(pending);
             this.pump();
+            this.changed();
         });
         this.pending.add(pending);
+    }
+    private changed(): void {
+        this.revision++;
+        for (const waiter of this.waiters) waiter();
+        this.waiters.clear();
     }
 }

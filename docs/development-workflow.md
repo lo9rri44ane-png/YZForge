@@ -143,6 +143,27 @@ show.bindings.command(this.btnClaim, model.claim, model.state, {
 
 工厂只同步创建和组合模型。`session.use` 不隐式加载所有远程数据。任务规则缺失时可以阻止本页打开；商城推荐、排行榜头像等独立内容可先显示占位，使用 `prepare({ required: false })` 在本区加载与反馈错误。首次必需准备失败使打开失败并保留原页，可选区域失败只影响本区。
 
+### 动态 Part、集合与列表
+
+页面使用 `show.bindings`，静态 Part 使用 `activation.bindings`，组合条目使用 `item.bindings`；三者提供相同的文本、属性、事件、命令与资源准备能力。
+
+```ts
+show.bindings.items(this.nodeItems, model.state, state => state.cards, {
+    key: card => card.id,
+    prefab: WorkshopRes.prefab.prefabsTaskPart,
+    part: TaskPart,
+    bind: (part, item) => part.bind(item, model.claim, workflowCall(show)),
+});
+```
+
+单个区域使用 `part(container, source, select, options)`，选择结果为 undefined 时清空。普通集合使用 items；大量数据使用 list 和 VirtualList。三者的业务条目统一使用 `PartContext<T>`：`key` 表示身份，`state` 提供 `{ data, index }` 的只读状态，`bindings` 管显示和输入，`assets` 管资源，`scope/run` 管当前身份的工作。
+
+普通集合的容器须为空且已加入节点树，由这一组合独占直接子节点。相同 Key 和相同 Prefab/Part 类型保留节点、订阅和绑定，只更新数据与必要顺序。新增项先准备；准备失败保留整个旧集合，连被保留条目的数据也不会提前更新。成功交接后才清理移除项。旧候选或移除项仍在清理时，新的实例创建等待其真实结束，避免不断创建补位节点。每个组合固定一种 Prefab/Part，换类型需要结束旧组合后重新挂载。
+
+Part 在 bind 中注册 text/property/command；同 ID 的更新通过 item.state 推送，禁止保存一次初始快照后期待 bind 再次执行。数据更新不会取消该身份下的全部工作；需要随参数替换的请求放进 prepare 或 Command.latest。列表滚动后的选择和编辑草稿由外部模型保留。
+
+`part/items/list` 默认参与页面或组件首绘屏障；可选区域显式设置 required:false 并提供 onError。ready 等待最新必需内容，也覆盖同 ID 数据更新触发的资源准备。part/items 的 refresh 重试尚未提交的集合候选，保留已有条目；已显示条目的资源错误用对应 prepare/present 句柄重试。虚拟列表的 refresh 则完整重建指定身份绑定。dispose 同步撤销该区域的首绘要求和输入，完整清理后才能复用其容器。首次失败、后续准备失败与同步渲染缺陷分别处理。详见[虚拟列表](virtual-list.md)。
+
 ### 四种使用期限
 
 | 所有者                            | 存放内容                                     | 结束时机                 |
@@ -217,7 +238,9 @@ show.bindings.prepare(model.state, state => state.itemIds, {
 });
 ```
 
-候选资源由 stage.scope 持有，只有最新代次可以同步交接；旧资源在新内容显示成功后才释放。取消先阻止回写，再等待工作实际退出。不要在 prepare 中等待自己的 dispose，也不要用 Command 的短期 Scope 持有操作结束后还要显示的节点。UIView 在 onShow 和组件准备后核对必需绑定；选择器及同步 render 错误进入宿主故障通道。后续 prepare 失败可保留旧内容，用返回句柄的 refresh() 重试。
+候选资源由 stage.scope 持有，只有最新代次可以同步交接；旧资源在新内容显示成功后才释放。取消先阻止回写，再等待工作实际退出。不要在 prepare 中等待自己的 dispose，也不要用 Command 的短期 Scope 持有操作结束后还要显示的节点。UIView 在 onShow 和组件准备后核对必需绑定；选择器及同步 render 错误进入宿主故障通道。后续 prepare 失败保留旧内容，用返回句柄的 refresh() 重试；准备失败通过 onError 反馈，省略时记录错误，不进入同步渲染缺陷的宿主故障通道。可选区域应自行显示占位、错误和重试入口。
+
+有资源准备的详情区域可以使用 `present`：它遵循 prepare 的规则，额外返回 `state: ReadonlyState<{ ready:false } | { ready:true; value:T }>`。画面成功交接后才发布 value；按钮从此状态捕获参数，避免源状态已切到 B、画面仍是 A 时操作 B。首次 ready:false 时禁用输入；Service 仍根据最新业务事实校验提交。present 的选择结果必须是纯数据，资源放在 prepare 的返回值中。
 
 两个换皮界面默认各有页面会话和局部选择，共享 Service 和模型实现。确需共用同一模型实例时，由明确的外部业务会话持有，每次调用仍传入当前显示端口，每个 View 独立绑定资源。布局一致只替换图片或字体，布局不同则使用各自 View / Prefab。同一逻辑 ViewKey 的皮肤在 App 创建前选择 Prefab；同时显示两套布局使用不同 Key。
 

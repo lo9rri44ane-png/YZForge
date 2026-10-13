@@ -1,9 +1,7 @@
 import { _decorator, Button, Node, ScrollView } from 'cc';
-import {
-    VirtualList,
-    type VirtualListHandle,
-    type VirtualListLayout,
-} from '../../../../../../framework/ui/components/virtual-list';
+import { VirtualList, type VirtualListLayout } from '../../../../../../framework/ui/components/virtual-list';
+import type { BoundVirtualList } from '../../../../../../framework/ui/view-bindings';
+import { State } from '../../../../../../framework/core/state';
 import type { ViewShowContext } from '../../../../../../framework/ui/ui-view';
 import {
     VirtualListItemPart,
@@ -19,7 +17,7 @@ const { ccclass } = _decorator;
 /** 一万条业务数据的列表/网格示例，演示局部刷新、定位、订阅与异步清理。 */
 @ccclass('showcase.VirtualListLabPage')
 export class VirtualListLabPage extends VirtualListLabPageBinding {
-    private list?: VirtualListHandle<VirtualListDemoRow>;
+    private list?: BoundVirtualList<VirtualListDemoRow>;
     protected onShow(show: ViewShowContext<void, void>): void {
         const rows = Array.from({ length: 10000 }, (_, index) => ({
             id: index + 1,
@@ -46,16 +44,15 @@ export class VirtualListLabPage extends VirtualListLabPageBinding {
             };
         };
         const component = this.nodeList.getComponent(VirtualList)!;
-        const list = component.mount<VirtualListDemoRow, VirtualListItemPart>({
-            owner: show.scope,
-            assets: show.assets,
+        const data = new State<readonly VirtualListDemoRow[]>(rows);
+        const list = show.bindings.list(component, data.readonly, (state) => state, {
             prefab: ShowcaseRes.prefab.prefabsVirtualListItemPart,
             part: VirtualListItemPart,
+            key: (row) => row.id,
             layout: layout(),
-            render: (part, item) => part.render(item),
+            bind: (part, item) => part.bind(item),
         });
         this.list = list;
-        list.setItems(rows, true);
         // 列表本身固定尺寸；示例页面在视口变化时明确重新计算三列的宽度。
         show.listen(scroll.view!.node, Node.EventType.SIZE_CHANGED, () => list.setLayout(layout()));
         const bind = (button: Button, action: () => void) => show.listen(button.node, Button.EventType.CLICK, action);
@@ -70,13 +67,13 @@ export class VirtualListLabPage extends VirtualListLabPageBinding {
         bind(this.btnTop, () => {
             if (list.count) list.scrollToIndex(0);
         });
-        bind(this.btnData, () => list.setItems(list.count ? [] : rows, true));
+        bind(this.btnData, () => data.set(list.count ? [] : rows));
         bind(this.btnRefresh, () => {
             const { start, end } = list.inspect().range;
             for (let index = start; index < end; index++) {
                 rows[index] = { ...rows[index], revision: rows[index].revision + 1 };
-                list.updateItem(index, rows[index]);
             }
+            data.set(rows);
         });
         bind(this.btnEvent, () => {
             this.ctx.events.emit(VirtualListDemoPulse, ++pulse);

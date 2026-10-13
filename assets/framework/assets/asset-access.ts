@@ -167,6 +167,9 @@ export interface AssetAccess {
      */
     activate(node: Node): void;
 
+    /** 在隐藏容器中启用托管实例，并按原生控件、业务组件顺序等待首绘准备。可见性与输入由调用方交接。 */
+    prepareInstance(node: Node): Promise<void>;
+
     /** 创建归当前 scope 所有的实例池，继承当前模块作为 Part 宿主。 */
     createPool(key: AssetKey<'Prefab'>, options?: PrefabPoolOptions): PrefabPoolAccess;
 

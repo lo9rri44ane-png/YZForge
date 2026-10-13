@@ -66,12 +66,13 @@ export class TutorialLabPage extends TutorialLabPageBinding {
             assets: show.assets,
             prefab: ShowcaseRes.prefab.prefabsVirtualListItemPart,
             part: VirtualListItemPart,
+            key: (row) => row.id,
             layout: layout(),
-            render: (part, item) => {
-                part.render(item);
-                targets.register(`showcase/reward/${item.data.id}`, part.node, item.scope);
+            bind: (part, item) => {
+                part.bind(item);
+                targets.register(`showcase/reward/${item.state.value.data.id}`, part.node, item.scope);
                 const clicked = () => {
-                    if (item.data.id !== 21) return;
+                    if (item.state.value.data.id !== 21) return;
                     try {
                         item.commit(() => {
                             invariant(state.trained > 0, 'DEMO_TRAIN_FIRST', '请先训练');
@@ -84,9 +85,7 @@ export class TutorialLabPage extends TutorialLabPageBinding {
                         });
                     }
                 };
-                part.node.on(Button.EventType.CLICK, clicked);
-                const off = item.signal.onAbort(() => part.node.off(Button.EventType.CLICK, clicked));
-                item.scope.defer(off);
+                item.bindings.listen(part.node, Button.EventType.CLICK, clicked);
             },
         });
         this.list = list;

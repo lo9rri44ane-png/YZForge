@@ -1,60 +1,52 @@
 import { _decorator, Component, isValid, Layout, Node, ScrollView, UITransform, Vec2, Widget } from 'cc';
 import type { AssetAccess } from '../../../assets/asset-access';
-import type { AssetKey } from '../../../assets/asset-types';
-import { GameComponent } from '../../../components/game-component';
-import { componentBindings } from '../../../components/component-binding';
+import type { GameComponent } from '../../../components/game-component';
 import { type ErrorReporter, invariant, reportError } from '../../../core/errors';
 import type { Lifetime } from '../../../core/scope';
-import {
-    VirtualListController,
-    type VirtualListItemContext,
-    type VirtualListSnapshot,
-} from './virtual-list-controller';
+import { VirtualListController, type VirtualListSnapshot } from './virtual-list-controller';
+import { PartPresentation, type PartOptions, type PartCell } from '../../part-presentation';
+import { ViewBindings } from '../../view-bindings';
+import type { ItemKey } from '../../item-binding';
 import { FixedVirtualLayout, type VirtualListAlignment, type VirtualListLayout } from './virtual-list-layout';
 
 const { ccclass, requireComponent, disallowMultiple } = _decorator;
 
 /** 一次列表会话的装配参数；业务预制体、Part 类型及渲染逻辑均由调用方提供。 */
-export interface VirtualListOptions<T, Part extends GameComponent> {
+export interface VirtualListOptions<T, Part extends GameComponent> extends PartOptions<T, Part> {
     /** 列表的使用期限，通常为 show.scope 或 activation.scope。 */
     readonly owner: Lifetime;
     /** 当前业务宿主的资源入口；内部重新绑定到每个实例的期限。 */
     readonly assets: AssetAccess;
-    /** 业务模块 dynamic 目录下生成的 Prefab Key；框架目录不存业务条目。 */
-    readonly prefab: AssetKey<'Prefab'>;
-    /** 预制体根节点上的业务 Part 类，通常继承自动生成的 Binding。 */
-    readonly part: new () => Part;
+    /** 稳定业务身份，必须唯一；不能使用列表索引。 */
+    readonly key: (data: T) => ItemKey;
     /** 固定尺寸、列数、间距、边距和预备行配置。 */
     readonly layout: VirtualListLayout;
-    /**
-     * 每次绑定和刷新时调用；须完整重置文本、颜色、按钮等业务显示状态。
-     * @param part 可重复使用的 Part；不要把旧模型或旧上下文永久保存在节点监听中。
-     * @param item 本次索引、模型及 Scope。订阅与图片持有使用 item.scope，异步工作使用 item.run。
-     * @returns 可异步准备；完成后才激活 Part。长期更新应放在 item.run 中并用 task.commit 提交。
-     */
-    readonly render: (part: Part, item: VirtualListItemContext<T>) => void | Promise<void>;
+    /** @internal 宿主显示期间的输入检查；通过 show.bindings.list 自动提供。 */
+    readonly interactive?: () => boolean;
     /** 可选同步错误上报器，不应抛错；失败条目保持隐藏，refresh 或重新进入窗口后重试。 */
     readonly onError?: ErrorReporter;
 }
 
 /** 一次挂载的类型化操作入口；结束后不能再更新数据，dispose 可重复调用。 */
 export interface VirtualListHandle<T> {
+    /** 当前窗口最新必需内容的准备屏障；失败立即拒绝，不等待清理完成。 */
+    readonly ready: Promise<void>;
     /** 当前数据数量。 */
     readonly count: number;
     /**
-     * 替换数据并刷新窗口；复制数组但不深复制元素，默认保留像素偏移并夹紧边界。
+     * 替换不可变数据；校验唯一 Key，仍可见的相同 Key 保留绑定，默认保留像素偏移。
      * @param items 新数据序列；追加、删除、排序后传入新的完整序列。
      * @param resetScroll 为 true 时回到顶部，默认 false。
      */
     setItems(items: readonly T[], resetScroll?: boolean): void;
     /**
-     * 替换一个模型并仅刷新该索引。
+     * 替换一个模型；相同 Key 推送条目状态，不同 Key 完整结束旧绑定。
      * @param index 要替换的零基索引；越界抛出 VIRTUAL_LIST_INDEX。
      * @param data 新模型引用；离屏时保存数据，进入窗口后再渲染。
      */
     updateItem(index: number, data: T): void;
     /**
-     * 刷新指定索引；先完整校验再执行，重复索引只刷新一次。
+     * 显式重建指定索引的身份绑定以完整重试；常规数据更新使用 setItems/updateItem。
      * @param indices 要刷新的索引集合；省略则刷新当前窗口，离屏项下次进入时读取最新数据。
      * @throws VIRTUAL_LIST_INDEX 集合中含越界或非整数索引，当前绑定不改变。
      */
@@ -73,7 +65,8 @@ export interface VirtualListHandle<T> {
      */
     scrollToIndex(index: number, alignment?: VirtualListAlignment, durationSeconds?: number): void;
     /**
-     * 等待当前加载、渲染和回收完成；不等待滚动动画及仍在显示的条目的长期任务。
+     * 等待实例加载、身份绑定和回收调度完成；同 ID 的资源更新等待 ready。
+     * 不等待滚动动画及仍在显示的条目的长期任务。
      * @returns 当前操作及其后续调度结束后兑现；业务渲染错误交给 onError，不通过此 Promise 重抛。
      */
     whenIdle(): Promise<void>;
@@ -81,7 +74,7 @@ export interface VirtualListHandle<T> {
     inspect(): VirtualListSnapshot;
     /**
      * 同步取消并隐藏条目，等待任务、订阅及实例完整清理；父级结束时自动调用。
-     * 不要在 item.run / render 中 await 自己列表的 dispose 或 whenIdle。
+     * 不要在 item.run / bind 中 await 自己列表的 dispose 或 whenIdle。
      * @returns 本会话的清理屏障；关闭期间清理失败时，在其余清理完成后以 SCOPE_CLEANUP_FAILED 拒绝。
      */
     dispose(): Promise<void>;
@@ -124,22 +117,23 @@ export class VirtualList extends Component {
             'VIRTUAL_LIST_SETUP',
             'Content 必须使用单位缩放且不旋转',
         );
-        type Cell = { node: Node; part: Part };
+        type Cell = PartCell<Part>;
         const report = options.onError ?? reportError;
+        let presentation!: PartPresentation<T, Part>;
         const controller = new VirtualListController<T, Cell>(
             options.owner,
             options.layout,
             {
                 create: async (owner) => {
-                    const node = await options.assets.in(owner).instantiate(options.prefab, content, { active: false });
-                    const part = node.getComponent(options.part);
+                    const cell = await presentation.create(owner),
+                        node = cell.node;
                     invariant(
-                        part && node.getComponent(UITransform),
+                        node.getComponent(UITransform),
                         'VIRTUAL_LIST_SETUP',
                         '条目根节点缺少指定 Part 或 UITransform',
                     );
                     this.assertManualLayout(node);
-                    return { node, part };
+                    return cell;
                 },
                 place: (cell, index, layout) => {
                     const itemTransform = cell.node.getComponent(UITransform)!;
@@ -151,23 +145,42 @@ export class VirtualList extends Component {
                             if (widget.node !== cell.node && widget.enabled) widget.updateAlignment();
                     }
                     const position = layout.position(index);
-                    cell.node.setPosition(
-                        position.x + itemWidth * itemTransform.anchorX,
-                        -position.y - itemHeight * (1 - itemTransform.anchorY),
-                        0,
-                    );
+                    const x = position.x + itemWidth * itemTransform.anchorX,
+                        y = -position.y - itemHeight * (1 - itemTransform.anchorY);
+                    if (cell.node.position.x !== x || cell.node.position.y !== y || cell.node.position.z !== 0)
+                        cell.node.setPosition(x, y, 0);
                 },
-                render: (cell, context) => options.render(cell.part, context),
-                activate: (cell) => options.assets.activate(cell.node),
-                deactivate: (cell) => {
-                    const parts = componentBindings(cell.node);
-                    for (const part of parts) part.__allow(undefined);
-                    cell.node.active = false;
-                    return Promise.all(parts.map((part) => part.__deactivate())).then(() => {});
-                },
+                bind: (cell, context) => presentation.bind(cell, context),
+                ready: (cell) => presentation.ready(cell),
+                activate: (cell) => presentation.show(cell),
+                deactivate: (cell) => presentation.deactivate(cell),
             },
+            options.key,
             report,
         );
+        try {
+            presentation = new PartPresentation(
+                controller.scope,
+                content,
+                options.assets,
+                options,
+                (owner, interactive, fault) =>
+                    new ViewBindings(
+                        owner,
+                        () => !controller.scope.signal.aborted,
+                        fault,
+                        () => (options.interactive?.() ?? true) && interactive(),
+                        options.assets,
+                    ),
+                (error, item) => {
+                    if (item) controller.failBinding(item, error);
+                    else report(error);
+                },
+            );
+        } catch (error) {
+            void controller.dispose().catch(report);
+            throw error;
+        }
         this.session = controller;
         let syncing = false;
         const assertActive = () => controller.scope.signal.throwIfAborted();
@@ -226,6 +239,9 @@ export class VirtualList extends Component {
             throw error;
         }
         return Object.freeze({
+            get ready() {
+                return controller.ready();
+            },
             get count() {
                 return controller.count;
             },

@@ -91,8 +91,14 @@ s.keys=[{id:'test.skin.cards',kind:'popup'},{id:'test.skin.compact',kind:'popup'
 for(const [index,definition] of [cards,compact].entries())app.ui.definitions.set(s.keys[index].id,{...definition,...s.keys[index],modal:false,cache:'keep-one'});
 s.cardHandle=await app.ui.open(s.keys[0],undefined,s.owner);
 s.cardRecord=[...app.ui.records.values()].find(r=>r.definition.id===s.keys[0].id);
-const view=s.cardRecord.instance.view;if(view.parts.size!==3)throw Error('Card skin did not prepare all Parts');
-s.cardNodes=[...view.parts.values()].map(part=>part.node.uuid);
+const view=s.cardRecord.instance.view;if(view._bindNodeItems.children.length!==3)throw Error('Card skin did not prepare all Parts');
+s.cardNodes=view._bindNodeItems.children.map(node=>node.uuid);
+const part=view._bindNodeItems.children[0].getComponent('workshop.TaskPart');let partClicks=0;
+const off=part.activation.bindings.listen(part.node,'test-part-input',()=>{partClicks++;});
+app.ui.setInteractive(s.cardRecord,false);part.node.emit('test-part-input');await s.wait(0);
+if(partClicks!==0)throw Error('Part activation bypassed View input restriction');
+app.ui.setInteractive(s.cardRecord,true);part.node.emit('test-part-input');await s.wait(0);
+if(partClicks!==1)throw Error('Part activation did not restore input');off();
 return true;`),
             true,
         );
@@ -116,7 +122,7 @@ s.compactInstance=s.compactRecord.instance.node.uuid;s.compactShow=s.compactReco
         assert.equal(
             await run(`
 const s=globalThis.__presentation;await s.until(()=>s.cardRecord.instance.view._bindLblOutput.string.includes('训练 1 次'));
-if(JSON.stringify(s.cardNodes)!==JSON.stringify([...s.cardRecord.instance.view.parts.values()].map(p=>p.node.uuid)))throw Error('Progress update recreated card nodes');
+if(JSON.stringify(s.cardNodes)!==JSON.stringify(s.cardRecord.instance.view._bindNodeItems.children.map(node=>node.uuid)))throw Error('Progress update recreated card nodes');
 if(!s.compactRecord.instance.view._bindLblOutput.string.includes('训练 1 次'))throw Error('Skins did not share domain facts');return true;`),
             true,
         );

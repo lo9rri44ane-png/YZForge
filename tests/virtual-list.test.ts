@@ -1,18 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Scope } from '../assets/framework/core/scope';
+import { StateBindings } from '../assets/framework/core/state-bindings';
 import { Events, eventKey } from '../assets/framework/core/events';
-import {
-    VirtualListController,
-    type VirtualListItemContext,
-} from '../assets/framework/ui/components/virtual-list/virtual-list-controller';
+import { VirtualListController } from '../assets/framework/ui/components/virtual-list/virtual-list-controller';
+import type { ItemContext } from '../assets/framework/ui/item-binding';
 import { FixedVirtualLayout } from '../assets/framework/ui/components/virtual-list/virtual-list-layout';
 import { deferred, flush } from './fake-clock';
 
 type Cell = { id: number; active: boolean; text: string; disposed: boolean };
 function fixture(
     input: {
-        render?: (cell: Cell, item: VirtualListItemContext<number>) => void | Promise<void>;
+        render?: (cell: Cell, item: ItemContext<number>) => void | Promise<void>;
         create?: () => Promise<void>;
         deactivate?: () => Promise<void>;
     } = {},
@@ -20,7 +19,7 @@ function fixture(
     const errors: unknown[] = [];
     const owner = new Scope('test', (error) => errors.push(error));
     const cells: Cell[] = [];
-    const renders: { cell: Cell; item: VirtualListItemContext<number> }[] = [];
+    const renders: { cell: Cell; item: ItemContext<number> }[] = [];
     const list = new VirtualListController<number, Cell>(
         owner,
         { itemWidth: 100, itemHeight: 20, overscanRows: 0 },
@@ -38,9 +37,11 @@ function fixture(
                 return cell;
             },
             place: () => {},
-            render: (cell, item) => {
+            bind: (cell, item) => {
                 renders.push({ cell, item });
-                cell.text = String(item.data);
+                item.state.subscribe(item.scope, (state) => {
+                    cell.text = String(state.data);
+                });
                 return input.render?.(cell, item);
             },
             activate: (cell) => {
@@ -51,11 +52,156 @@ function fixture(
                 return input.deactivate?.() ?? Promise.resolve();
             },
         },
+        (data) => data,
         (error) => errors.push(error),
     );
     return { owner, list, cells, renders, errors };
 }
 const data = (count: number) => Array.from({ length: count }, (_, i) => i);
+
+test('相同 Key 的整表更新和重排保留节点、订阅和绑定期限', async () => {
+    const f = fixture();
+    f.list.setViewport(60, 0);
+    f.list.setItems([1, 2, 3]);
+    await f.list.ready();
+    const original = f.renders.slice();
+    for (let i = 0; i < 20; i++) {
+        f.list.setItems([1, 2, 3]);
+        await f.list.ready();
+    }
+    f.list.setItems([3, 1, 2]);
+    await f.list.ready();
+    assert.equal(f.renders.length, 3);
+    assert.equal(original[0].item.state.value.index, 1);
+    assert.equal(original[0].item.key, 1);
+    assert.ok(original.every(({ item }) => !item.signal.aborted));
+    assert.throws(() => f.list.setItems([1, 1]), { code: 'ITEM_KEY_DUPLICATE' });
+    assert.throws(() => f.list.updateItem(0, 1), { code: 'ITEM_KEY_DUPLICATE' });
+    assert.equal(f.list.count, 3);
+    assert.deepEqual(f.list.inspect().indices, [0, 1, 2]);
+    await f.owner.close();
+});
+
+test('相同业务 ID 的新数据通过条目状态推送，窗口外数据不创建节点', async () => {
+    const owner = new Scope('keyed-list'),
+        contexts: ItemContext<{ id: number; title: string }>[] = [];
+    let text = '',
+        creates = 0;
+    const list = new VirtualListController<{ id: number; title: string }, object>(
+        owner,
+        { itemWidth: 10, itemHeight: 20, overscanRows: 0 },
+        {
+            create: async () => {
+                creates++;
+                return {};
+            },
+            bind: (_cell, item) => {
+                contexts.push(item);
+                item.state.subscribe(item.scope, (state) => {
+                    text = state.data.title;
+                });
+            },
+            place: () => {},
+            activate: () => {},
+            deactivate: async () => {},
+        },
+        (item) => item.id,
+    );
+    list.setViewport(20, 0);
+    list.setItems([
+        { id: 1, title: 'old' },
+        { id: 2, title: 'offscreen' },
+    ]);
+    await list.ready();
+    list.updateItem(0, { id: 1, title: 'new' });
+    await list.ready();
+    assert.equal(text, 'new');
+    assert.equal(contexts.length, 1);
+    assert.equal(contexts[0].signal.aborted, false);
+    assert.equal(creates, 1);
+    await owner.close();
+});
+
+test('当前窗口失败即交付 ready 错误，物理清理仍单独等待', async () => {
+    const gate = deferred<void>();
+    const f = fixture({
+        render: (_cell, item) => {
+            item.scope.defer(() => gate.promise);
+            throw Error('offline');
+        },
+    });
+    f.list.setViewport(20, 0);
+    f.list.setItems([1]);
+    await assert.rejects(f.list.ready(), /offline/);
+    assert.equal(f.cells[0].disposed, false);
+    let closed = false;
+    const closing = f.owner.close().then(() => {
+        closed = true;
+    });
+    await flush();
+    assert.equal(closed, false);
+    gate.resolve();
+    await closing;
+    assert.equal(f.cells[0].disposed, true);
+});
+
+test('ready 跟随同 ID 的资源更新及更新期间的新版本，取消不等待物理准备', async () => {
+    const owner = new Scope('list-required-resources');
+    const gates = [deferred<string>(), deferred<string>(), deferred<string>()];
+    type Row = { id: number; version: number };
+    type PreparedCell = { bindings?: StateBindings; text: string };
+    let binds = 0;
+    const list = new VirtualListController<Row, PreparedCell>(
+        owner,
+        { itemWidth: 10, itemHeight: 20, overscanRows: 0 },
+        {
+            create: async () => ({ text: '' }),
+            bind: (cell, item) => {
+                binds++;
+                cell.bindings = new StateBindings(item.scope);
+                cell.bindings.prepare(item.state, (state) => state.data.version, {
+                    prepare: (version) => (version ? gates[version - 1].promise : 'initial'),
+                    render: (text) => {
+                        cell.text = text;
+                    },
+                });
+                return cell.bindings.ready();
+            },
+            ready: (cell) => cell.bindings!.ready(),
+            place: () => {},
+            activate: () => {},
+            deactivate: async () => {},
+        },
+        (row) => row.id,
+    );
+    list.setViewport(20, 0);
+    list.setItems([{ id: 1, version: 0 }]);
+    await list.ready();
+    list.updateItem(0, { id: 1, version: 1 });
+    let settled = false;
+    const ready = list.ready().then(() => {
+        settled = true;
+    });
+    await flush();
+    assert.equal(settled, false);
+    list.updateItem(0, { id: 1, version: 2 });
+    gates[0].resolve('stale');
+    await flush();
+    assert.equal(settled, false);
+    gates[1].resolve('latest');
+    await ready;
+    assert.equal(binds, 1);
+    list.updateItem(0, { id: 1, version: 3 });
+    const cancelled = assert.rejects(list.ready(), { code: 'OPERATION_CANCELLED' });
+    let closed = false;
+    const closing = owner.close().then(() => {
+        closed = true;
+    });
+    await cancelled;
+    assert.equal(closed, false);
+    gates[2].resolve('late');
+    await closing;
+});
 
 test('固定列表、网格的尺寸、锚点无关位置和末行计算', () => {
     const layout = new FixedVirtualLayout({
@@ -125,7 +271,7 @@ test('十万条数据只创建窗口实例，长距离跳转复用节点且不�
     assert.equal(f.cells.length, 3);
     f.list.setViewport(60, 20);
     await f.list.whenIdle();
-    assert.equal(f.renders.filter((r) => r.item.index === 1).length, 1);
+    assert.equal(f.renders.filter((r) => r.item.state.value.index === 1).length, 1);
     f.list.setViewport(60, 500000);
     await f.list.whenIdle();
     assert.deepEqual(f.list.inspect().indices, [25000, 25001, 25002]);
@@ -151,7 +297,7 @@ test('局部刷新只更换指定绑定，重复索引合并，离屏更新在�
     assert.equal(f.renders.length, 4);
     f.list.setViewport(60, 1600);
     await f.list.whenIdle();
-    assert.equal(f.renders.findLast((r) => r.item.index === 80)?.cell.text, '888');
+    assert.equal(f.renders.findLast((r) => r.item.state.value.index === 80)?.cell.text, '888');
     await f.owner.close();
 });
 
@@ -162,7 +308,7 @@ test('数组快照、同索引新数据、清空、缩短后偏移夹紧及重�
     f.list.setItems(values);
     values[0] = 999;
     await f.list.whenIdle();
-    assert.equal(f.renders[0].item.data, 0);
+    assert.equal(f.renders[0].item.state.value.data, 0);
     f.list.setViewport(40, 1960);
     await f.list.whenIdle();
     f.list.setItems([8, 7, 6]);
@@ -185,7 +331,7 @@ test('异步任务与清理屏障完成前不复用同一节点，旧 commit 被
     let committed = true;
     const f = fixture({
         render: (cell, item) => {
-            if (item.index === 0)
+            if (item.state.value.index === 0)
                 oldTask = item.run(async (task) => {
                     await gate.promise;
                     committed = task.commit(() => {
@@ -242,7 +388,7 @@ test('绑定期限取消时立即移除事件订阅；新绑定仅接收一次',
             events.on(
                 key,
                 () => {
-                    received.push(item.index);
+                    received.push(item.state.value.index);
                 },
                 item.scope,
             );
@@ -283,7 +429,7 @@ test('加载中跳转和替换数据采用最新窗口，实例加载数量有�
     await f.list.whenIdle();
     assert.ok(loads <= 3);
     assert.deepEqual(f.list.inspect().indices, [0, 1]);
-    assert.ok(f.renders.every((r) => r.item.data === 88 || r.item.data === 99));
+    assert.ok(f.renders.every((r) => r.item.state.value.data === 88 || r.item.state.value.data === 99));
     await f.owner.close();
 });
 
@@ -374,7 +520,7 @@ test('取消监听重入 dispose 时退出屏障已经登记，不死锁且只�
 
 test('异步 render 返回前失效，旧实例不会被迟到的激活显示', async () => {
     const gate = deferred<void>();
-    const f = fixture({ render: (_cell, item) => (item.index === 0 ? gate.promise : undefined) });
+    const f = fixture({ render: (_cell, item) => (item.state.value.index === 0 ? gate.promise : undefined) });
     f.list.setViewport(20, 0);
     f.list.setItems(data(10));
     for (let i = 0; i < 12; i++) await flush();
@@ -442,7 +588,7 @@ test('视口扩大缩小、网格切换和零高度恢复，不重绑仍有效�
     f.list.setLayout({ itemWidth: 20, itemHeight: 20, columns: 3, overscanRows: 0 });
     await f.list.whenIdle();
     assert.equal(f.list.inspect().indices.length, 15);
-    assert.equal(f.renders.filter((r) => r.item.index === 0).length, 1);
+    assert.equal(f.renders.filter((r) => r.item.state.value.index === 0).length, 1);
     f.list.setViewport(20, 0);
     await f.list.whenIdle();
     assert.ok(f.list.inspect().slots <= 6);
@@ -522,7 +668,7 @@ test('反复局部刷新后 Scope 子级数量稳定，不残留旧绑定期限'
     f.list.setItems(data(100));
     await f.list.whenIdle();
     for (let i = 0; i < 60; i++) {
-        f.list.updateItem(0, i);
+        f.list.updateItem(0, 1000 + i);
         await f.list.whenIdle();
     }
     const snapshot = f.list.scope.inspect();

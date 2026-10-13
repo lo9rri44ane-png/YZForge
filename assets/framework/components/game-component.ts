@@ -4,7 +4,7 @@ import type { ConfigAccess } from '../config/config-access';
 import type { AudioAccess } from '../audio/audio-access';
 import type { LocalizationAccess } from '../ui/localization/localization-access';
 import { Actions } from '../core/actions';
-import { StateBindings } from '../core/state-bindings';
+import type { ViewBindings } from '../ui/view-bindings';
 import type { ModuleContext } from '../modules/module-manager';
 import type { TimeAccess } from '../time/time-access';
 import { registerComponentBinding } from './component-binding';
@@ -17,7 +17,7 @@ const { ccclass } = _decorator;
  */
 export interface ActivationContext extends TaskContext {
     /** 本次激活的状态绑定；必需准备完成后才运行业务帧。 */
-    readonly bindings: StateBindings;
+    readonly bindings: ViewBindings;
     /** 本次激活的多语言使用入口；实例池复用不会保留上次绑定。 */
     readonly i18n: LocalizationAccess;
     /** 本次激活的资源入口；禁用后归还，重新激活使用新的入口。 */
@@ -230,9 +230,8 @@ export class GameComponent extends Component {
         };
         const activation: ActivationContext = Object.freeze({
             ...taskContext(scope, current),
-            ...this.ctx.componentServices(scope, current),
+            ...this.ctx.componentServices(scope, current, fault, () => this.prepared),
             actions: new Actions(scope.lifetime, current),
-            bindings: new StateBindings(scope.lifetime, current, fault),
             run: <T>(task: (context: TaskContext) => T | Promise<T>) => runTask(scope, task, current),
         });
         this.activation = activation;

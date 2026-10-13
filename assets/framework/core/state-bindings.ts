@@ -1,7 +1,7 @@
 import { OperationCancelled, type ErrorReporter, reportError } from './errors';
 import { untilCancelled } from './cancellation';
 import { runTask, type Lifetime, type Scope, type TaskContext } from './scope';
-import { type ReadonlyState, type Snapshot, reportObserverError, synchronousStateEffect } from './state';
+import { State, type ReadonlyState, type Snapshot, reportObserverError, synchronousStateEffect } from './state';
 import { claimProperties } from './property-lease';
 
 /** 一块显示区域的准备屏障和控制入口。资源归绑定所有，不归 ViewModel 或短期 Actions 所有。 */
@@ -12,6 +12,12 @@ export interface StateBinding {
     refresh(): void;
     /** 同步停止订阅和回写，等待本绑定实际工作结束后释放资源；不能在自己的 prepare 中等待。 */
     dispose(): Promise<void>;
+}
+
+/** 已实际交接到画面的纯数据。输入绑定到此状态，准备期间仍对应旧画面。 */
+export type PresentedValue<T> = { readonly ready: false } | { readonly ready: true; readonly value: T };
+export interface PresentedBinding<T> extends StateBinding {
+    readonly state: ReadonlyState<PresentedValue<T>>;
 }
 
 /** 同步绑定的选择规则。选择值使用 Object.is 比较；对象分支应复用不可变快照。 */
@@ -90,18 +96,59 @@ export class StateBindings {
         return this.connect(source, select, options);
     }
 
+    /** 与 prepare 相同的资源规则，并提供已显示快照用于按钮参数；选中值必须是纯数据。 */
+    present<S, T, P>(
+        source: ReadonlyState<S>,
+        select: (state: Snapshot<S>) => T,
+        options: PrepareBinding<T, P>,
+    ): PresentedBinding<T> {
+        const displayed = new State<PresentedValue<T>>({ ready: false });
+        const binding = this.prepare(source, select, {
+            ...options,
+            render: (prepared, value, previous) => {
+                synchronousStateEffect(options.render(prepared, value, previous));
+                displayed.set({ ready: true, value });
+            },
+        });
+        return Object.freeze({
+            state: displayed.readonly,
+            get ready() {
+                return binding.ready;
+            },
+            refresh: binding.refresh,
+            dispose: binding.dispose,
+        });
+    }
+
     /** 等待已注册的必需绑定；UIView 在 onShow 后自动调用，后加的绑定可单独等待其 ready。 */
     async ready(): Promise<void> {
         try {
             for (;;) {
                 const revision = this.revision;
-                await Promise.all(Array.from(this.required, (binding) => binding.ready));
+                try {
+                    await Promise.all(Array.from(this.required, (binding) => binding.ready));
+                } catch (error) {
+                    if (revision === this.revision) throw error;
+                }
                 this.owner.signal.throwIfAborted();
                 if (revision === this.revision) return;
             }
         } finally {
             this.preparing = false;
         }
+    }
+
+    /** @internal 让组合区域参与同一首绘屏障，不再创建第二套页面准备调度器。 */
+    protected include(binding: StateBinding, required = true): () => void {
+        if (required) this.required.add(binding);
+        this.revision++;
+        const detach = this.owner.defer(() => {
+            this.required.delete(binding);
+        });
+        return () => {
+            if (this.required.delete(binding)) this.revision++;
+            detach();
+        };
     }
 
     private connect<S, T, P>(
@@ -134,7 +181,7 @@ export class StateBindings {
             if (error instanceof OperationCancelled || !active()) return;
             const initial = !painted;
             // 初始必需错误由 ready 交给宿主，避免在 onShow 准备栈内重入关闭。
-            const report = preparing && options.onError ? options.onError : this.fault;
+            const report = preparing ? (options.onError ?? reportError) : this.fault;
             if (!initial || !this.preparing || options.required === false || (preparing && options.onError))
                 reportObserverError(report, error);
         };
@@ -268,6 +315,7 @@ export class StateBindings {
             },
             refresh: () => update(source.value, true),
             dispose: () => {
+                if (this.required.delete(binding)) this.revision++;
                 owner.cancel();
                 return owner.drainCancelledTasks().then(() => owner.close());
             },

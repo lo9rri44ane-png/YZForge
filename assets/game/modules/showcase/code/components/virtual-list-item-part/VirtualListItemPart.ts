@@ -1,7 +1,7 @@
 import { _decorator } from 'cc';
 import { eventKey } from '../../../../../../framework/core/events';
 import { OperationCancelled, reportError } from '../../../../../../framework/core/errors';
-import type { VirtualListItemContext } from '../../../../../../framework/ui/components/virtual-list';
+import type { PartContext } from '../../../../../../framework/ui/part-presentation';
 import { VirtualListItemPartBinding } from './generated/VirtualListItemPartBinding';
 import { badgeKey } from '../../../../../../framework/badges/badge-store';
 import { Badge } from '../../../../../../framework/ui/components/badge/badge';
@@ -27,18 +27,19 @@ export const VirtualListBadges = badgeKey('showcase/list');
 @ccclass('showcase.VirtualListItemPart')
 export class VirtualListItemPart extends VirtualListItemPartBinding {
     /**
-     * 完整重置旧显示，并捕获本次 item；不要在 await 后读取被下一次绑定覆盖的成员字段。
-     * @param item 本次业务模型、索引和期限，由 VirtualList.mount 的 render 转交。
+     * 注册当前身份的状态绑定，并捕获稳定 ID；相同 ID 更新不会重复注册订阅。
+     * @param item 本次业务模型、索引和期限，由普通集合或 VirtualList 的 bind 转交。
      */
-    render(item: VirtualListItemContext<VirtualListDemoRow>): void {
-        this.nodeBadge.getComponent(Badge)!.bind(this.ctx.badges, virtualRowBadge(item.data.id), item.scope);
-        this.lblTitle.string = `${item.data.title} · v${item.data.revision}`;
+    bind(item: PartContext<VirtualListDemoRow>): void {
+        const id = item.state.value.data.id;
+        this.nodeBadge.getComponent(Badge)!.bind(this.ctx.badges, virtualRowBadge(id), item.scope);
+        item.bindings.text(this.lblTitle, item.state, ({ data }) => `${data.title} · v${data.revision}`);
         this.lblDetail.string = '等待异步详情…';
         this.ctx.events.on(
             VirtualListDemoPulse,
             (pulse, task) => {
                 task.commit(() => {
-                    this.lblDetail.string = `条目 ${item.data.id} · 广播 ${pulse}`;
+                    this.lblDetail.string = `条目 ${id} · 广播 ${pulse}`;
                 });
             },
             item.scope,
@@ -52,7 +53,7 @@ export class VirtualListItemPart extends VirtualListItemPartBinding {
                             detach();
                             resolve();
                         },
-                        250 + (item.data.id % 5) * 80,
+                        250 + (id % 5) * 80,
                     );
                     const detach = task.signal.onAbort(() => {
                         clearTimeout(timer);
@@ -60,7 +61,7 @@ export class VirtualListItemPart extends VirtualListItemPartBinding {
                     });
                 });
                 task.commit(() => {
-                    this.lblDetail.string = `条目 ${item.data.id} · 详情已就绪`;
+                    this.lblDetail.string = `条目 ${id} · 详情已就绪`;
                 });
             })
             .catch((error) => {

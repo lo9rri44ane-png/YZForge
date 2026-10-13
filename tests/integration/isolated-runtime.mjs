@@ -16,7 +16,7 @@ export async function isolatedRuntime(urlText, name, work) {
     const id = await editor(
         `const w=new (require('electron').BrowserWindow)({show:false,width:900,height:1300,webPreferences:{nodeIntegration:false,contextIsolation:true,backgroundThrottling:false,offscreen:true,partition:args.name+'-'+Date.now()}});
 w.webContents.__yzforgeIsolatedCheck=args.name;w.__testErrors=[];
-w.webContents.on('console-message',(_,level,message)=>{if(level>=3)w.__testErrors.push(message);});
+w.webContents.on('console-message',(_,level,message,line,source)=>{if(level>=3)w.__testErrors.push({message,line,source});});
 try{await w.loadURL(args.url);return w.id;}catch(error){w.destroy();throw error;}`,
         { name, url: url.href },
     );
@@ -56,7 +56,11 @@ return {x:Math.round(rect.left+p.x/canvas.width*rect.width),y:Math.round(rect.to
             if (ready) break;
             await new Promise((resolve) => setTimeout(resolve, 150));
         }
-        assert.ok(ready, 'Bootstrap did not become ready');
+        assert.ok(
+            ready,
+            'Bootstrap did not become ready: ' +
+                JSON.stringify(await editor(target + 'return w.__testErrors;', { id, name })),
+        );
         await work({ run, click, capture });
         assert.deepEqual(await editor(target + 'return w.__testErrors;', { id, name }), [], 'Runtime errors');
     } finally {

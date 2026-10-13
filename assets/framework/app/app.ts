@@ -14,12 +14,18 @@ import { createPlatformSdkAdapter, resolveSdkRuntime, type SdkPlatformRegistrati
 import { TimeService } from '../time/time-service';
 import type { TimeOptions } from '../time/time-access';
 import { UIManager, ViewDefinition } from '../ui/ui-manager';
+import { ViewBindings } from '../ui/view-bindings';
 import { ClockDriver, SystemClockDriver } from '../core/clock-driver';
 import { Events } from '../core/events';
 import { Scope, Lifetime } from '../core/scope';
 import { ErrorReporter, FrameworkError } from '../core/errors';
 import { GameLog } from '../core/game-log';
-import { componentBindings, ComponentHost, allowInstanceComponents } from '../components/component-binding';
+import {
+    componentBindings,
+    ComponentHost,
+    allowInstanceComponents,
+    prepareInstanceComponents,
+} from '../components/component-binding';
 import { BootFlow, notifyBootCleaning } from './boot';
 import { BadgeStore } from '../badges/badge-store';
 import { HttpClient, type HttpClientOptions, type HttpTransport } from '../network/http-client';
@@ -311,9 +317,15 @@ export class App {
                     ui: this.ui,
                     audio: this.audio,
                     createSession,
-                    componentServices: (owner: Scope, current: () => boolean) => {
+                    componentServices: (
+                        owner: Scope,
+                        current: () => boolean,
+                        fault?: ErrorReporter,
+                        interactive?: () => boolean,
+                    ) => {
                         const assets = this.assets.in(owner.lifetime, `${id}/default`, id);
                         return Object.freeze({
+                            bindings: new ViewBindings(owner.lifetime, current, fault, interactive, assets),
                             assets,
                             config: this.config.in(owner.lifetime),
                             audio: this.audio.in(owner.lifetime),
@@ -344,6 +356,7 @@ export class App {
         this.assets.activateInstance = (node, scope) => {
             allowInstanceComponents(node, scope);
         };
+        this.assets.prepareInstanceComponents = prepareInstanceComponents;
         this.ui = new UIManager(
             input.uiRoot,
             this.assets,

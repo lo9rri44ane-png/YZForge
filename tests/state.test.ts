@@ -184,6 +184,7 @@ test('required preparation fails readiness; optional preparation reports and kee
     );
     optional.prepare(state.readonly, (s) => s, {
         required: false,
+        onError: (error) => errors.push(error),
         prepare: () => {
             throw Error('optional');
         },
@@ -386,5 +387,39 @@ test('bindings registered after the initial readiness gate report their first re
         },
     );
     assert.equal(faults.length, 1);
+    await owner.close();
+});
+test('present publishes only the displayed identity; old and failed preparations cannot change command input', async () => {
+    const owner = new Scope('present'),
+        source = new State(1),
+        slow = deferred<void>();
+    let visible = 0;
+    const errors: unknown[] = [];
+    const binding = new StateBindings(owner).present(source.readonly, (value) => value, {
+        prepare: async (value) => {
+            if (value === 2) await slow.promise;
+            if (value === 4) throw Error('offline');
+            return value;
+        },
+        render: (value) => {
+            visible = value;
+        },
+        onError: (error) => errors.push(error),
+    });
+    await binding.ready;
+    assert.deepEqual(binding.state.value, { ready: true, value: 1 });
+    source.set(2);
+    await flush();
+    assert.equal(visible, 1);
+    assert.deepEqual(binding.state.value, { ready: true, value: 1 });
+    source.set(3);
+    await binding.ready;
+    slow.resolve();
+    await flush();
+    assert.equal(visible, 3);
+    assert.deepEqual(binding.state.value, { ready: true, value: 3 });
+    source.set(4);
+    await assert.rejects(binding.ready, /offline/);
+    assert.deepEqual(binding.state.value, { ready: true, value: 3 });
     await owner.close();
 });

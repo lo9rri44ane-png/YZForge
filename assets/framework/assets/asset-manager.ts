@@ -24,7 +24,7 @@ import type { ConfigAccess } from '../config/config-access';
 import { untilCancelled } from '../core/cancellation';
 import { bindAdditionalComponents } from '../components/component-binding';
 import { FrameworkError, invariant, OperationCancelled, reportError } from '../core/errors';
-import { Scope, Lifetime, scopeOwner } from '../core/scope';
+import { Scope, Lifetime, scopeOwner, runTask } from '../core/scope';
 import {
     AssetAddress,
     AssetKey,
@@ -90,6 +90,10 @@ export class Assets {
      * App 注入的激活适配器，在节点激活前接通框架组件生命周期。
      */
     activateInstance: (node: Node, scope: Scope) => void = () => {};
+    /** @internal App 注入有首绘屏障的激活适配器。 */
+    prepareInstanceComponents: (node: Node, scope: Scope) => Promise<void> = async (node) => {
+        node.active = true;
+    };
     /**
      * @internal
      * App 注入的代码准备器，确保预制体反序列化所需脚本已注册，不启动业务工厂。
@@ -434,6 +438,22 @@ export class Assets {
         this.activateInstance(node, activation);
         node.active = true;
     }
+    /** 在调用方的隐藏容器中准备原生与业务组件；不接管显示或输入交接。 */
+    prepareInstance(node: Node): Promise<void> {
+        const instance = this.instances.get(node);
+        invariant(
+            instance && isValid(node, true),
+            'INSTANCE_NOT_MANAGED',
+            'Prepare only a framework-owned prefab instance',
+        );
+        if (instance.moduleId) invariant(this.moduleReady(instance.moduleId), 'MODULE_NOT_READY', instance.moduleId);
+        return runTask(
+            instance.scope,
+            () => this.prepareInstanceComponents(node, instance.scope),
+            undefined,
+            'instance:prepare',
+        );
+    }
     /** 创建有容量上限的预制体实例池，节点与资源跟随 owner；每次 spawn 独立管理使用期限。 */
     createPool(key: AssetKey<'Prefab'>, owner: Lifetime, options?: PrefabPoolOptions): PrefabPool {
         return new PrefabPool(this, key, owner, options);
@@ -690,6 +710,9 @@ export class ScopedAssets implements AssetAccess {
      */
     activate(node: Node): void {
         this.manager.activate(node);
+    }
+    prepareInstance(node: Node): Promise<void> {
+        return this.manager.prepareInstance(node);
     }
     /** 创建归当前 scope 所有的实例池，继承当前模块作为 Part 宿主。 */
     createPool(key: AssetKey<'Prefab'>, options?: PrefabPoolOptions): PrefabPool {

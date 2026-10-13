@@ -12,6 +12,7 @@ import { TimeService } from '../time/time-service';
 import { UIView, ViewShowContext } from './ui-view';
 import { Actions } from '../core/actions';
 import { ViewBindings } from './view-bindings';
+import { guardUIInput } from './input-guard';
 import { ViewSession } from './view-session';
 import { ScopedLocalization } from './localization/localized-ui';
 
@@ -522,7 +523,7 @@ export class UIManager {
             ...taskContext(scope, isCurrent),
             session: record.session!,
             actions: new Actions(scope.lifetime, isCurrent),
-            bindings: new ViewBindings(scope.lifetime, isCurrent, fault, () => record.interactive),
+            bindings: new ViewBindings(scope.lifetime, isCurrent, fault, () => record.interactive, scopedAssets),
             assets: scopedAssets,
             i18n: new ScopedLocalization(instance.context.i18n, scopedAssets, scope.lifetime, isCurrent),
             config: instance.context.config.in(scope),
@@ -532,34 +533,8 @@ export class UIManager {
             params: record.params,
             time: this.time.in(scope),
             run: <T>(task: (task: TaskContext) => T | Promise<T>) => runTask(scope, task, isCurrent),
-            listen: (
-                node: Node,
-                event: string,
-                callback: (...args: unknown[]) => void | Promise<void>,
-                onError?: (error: unknown) => void,
-            ) => {
-                scope.signal.throwIfAborted();
-                const handler = (...args: unknown[]) => {
-                    if (!isCurrent() || !record.interactive) return;
-                    void runTask(scope, () => callback(...args), isCurrent, `event:${event}`).catch((error) => {
-                        if (!(error instanceof OperationCancelled)) {
-                            try {
-                                (onError ?? this.report)(error);
-                            } catch (handlerError) {
-                                this.report(handlerError);
-                            }
-                        }
-                    });
-                };
-                node.on(event, handler);
-                let detach = () => {};
-                const off = () => {
-                    if (isValid(node)) node.off(event, handler);
-                    detach();
-                };
-                detach = scope.signal.onAbort(off);
-                return off;
-            },
+            listen: (node, event, callback, onError) =>
+                context.bindings.listen(node, event, callback, onError ?? this.report),
             setSprite: (sprite, key) => runTask(scope, () => scopedAssets.setSprite(sprite, key), isCurrent),
             finish: (value) => {
                 if (isCurrent() && !scope.signal.aborted)
@@ -571,6 +546,8 @@ export class UIManager {
             },
         });
         record.show = context;
+        // 静态 Part 的 activation.bindings 也继承页面准备、遮挡和导航期间的输入限制。
+        guardUIInput(instance.node, scope.lifetime, () => record.interactive);
         instance.host.begin(scope);
         record.suspended = false;
         instance.view.__bind(instance.context, fault);

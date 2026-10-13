@@ -4,9 +4,12 @@ import type { ConfigAccess } from '../config/config-access';
 import type { Scope } from '../core/scope';
 import type { TimeAccess } from '../time/time-access';
 import type { LocalizationAccess } from '../ui/localization/localization-access';
+import type { ViewBindings } from '../ui/view-bindings';
+import type { ErrorReporter } from '../core/errors';
 
 /** 组件只消费当前激活期的能力；具体服务由应用装配，宿主不加载 UI 实现。 */
 export interface ComponentServices {
+    readonly bindings: ViewBindings;
     readonly assets: AssetAccess;
     readonly config: ConfigAccess;
     readonly audio: AudioAccess;
@@ -14,7 +17,12 @@ export interface ComponentServices {
     readonly i18n: LocalizationAccess;
 }
 /** @internal 每次激活创建新入口，异步回写仍需验证该次激活是否有效。 */
-export type ComponentServicesFactory = (owner: Scope, current: () => boolean) => ComponentServices;
+export type ComponentServicesFactory = (
+    owner: Scope,
+    current: () => boolean,
+    fault?: ErrorReporter,
+    interactive?: () => boolean,
+) => ComponentServices;
 
 /** @internal 原生扩展只需激活期服务工厂，不依赖完整业务模块上下文。 */
 export interface ComponentServicesHost {

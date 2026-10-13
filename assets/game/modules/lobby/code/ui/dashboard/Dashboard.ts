@@ -1,4 +1,4 @@
-import { _decorator, Button, Node } from 'cc';
+import { _decorator, Button, Node, UITransform } from 'cc';
 import type { ViewShowContext } from '../../../../../../framework/ui/ui-view';
 import type { DashboardParams, DashboardResult } from '../../../contracts/Dashboard.types';
 import { ItemsTable } from '../../generated/config/Items.table';
@@ -8,6 +8,7 @@ import { DashboardBinding } from './generated/DashboardBinding';
 import { LobbyServices } from '../../LobbyServices';
 import { WalletPart } from '../../components/wallet-part/WalletPart';
 import { EconomyTable } from '../../../../common/public';
+import { State } from '../../../../../../framework/core/state';
 const { ccclass } = _decorator;
 /**
  * 框架 API 演示页面：配置、时间、节点事件、弹窗结果、音频及动态图片。
@@ -26,29 +27,26 @@ export class Dashboard extends DashboardBinding {
         const service = this.ctx.services(LobbyServices).lobby;
         const reward = await service.reward(show.scope);
         this.lblStatus.string = '共享 Profile 服务 · 公共配置 common';
-        let wallet: Node | undefined;
-        const renderWallet = () => wallet?.getComponent(WalletPart)?.render(service.state.value.coins);
-        const replaceWallet = async () => {
-            const previous = wallet;
-            wallet = undefined;
-            if (previous) await show.assets.destroyInstance(previous);
-            const parent = this.lblResult.node.parent;
-            if (!parent) throw Error('Dashboard content is missing');
-            const node = await show.assets.instantiate(LobbyRes.prefab.prefabsWalletPart, parent, { active: false });
-            if (
-                !show.commit(() => {
-                    wallet = node;
-                    node.setPosition(0, -487);
-                    renderWallet();
-                    show.assets.activate(node);
-                })
-            )
-                await show.assets.destroyInstance(node);
-        };
-        await replaceWallet();
-        service.state.subscribe(show.scope, () => {
-            show.commit(renderWallet);
+        const slot = new Node('WalletSlot');
+        slot.layer = this.node.layer;
+        slot.addComponent(UITransform).setContentSize(600, 50);
+        slot.parent = this.lblResult.node.parent;
+        slot.setPosition(0, -487);
+        show.scope.defer(() => {
+            slot.destroy();
         });
+        const wallet = new State({ id: 0, coins: service.state.value.coins });
+        const region = show.bindings.part(slot, wallet.readonly, (state) => state, {
+            key: (state) => state.id,
+            prefab: LobbyRes.prefab.prefabsWalletPart,
+            part: WalletPart,
+            bind: (part, item) => part.bind(item),
+        });
+        service.state.subscribe(show.scope, (state) => wallet.set({ ...wallet.readonly.value, coins: state.coins }));
+        const replaceWallet = async () => {
+            wallet.set({ ...wallet.readonly.value, id: wallet.readonly.value.id + 1 });
+            await region.ready;
+        };
         await this.readItems(show);
         this.refreshClock(show);
         // 日期展示与日切通知共同继承项目设置，不再分别手写偏移。
@@ -86,7 +84,7 @@ export class Dashboard extends DashboardBinding {
                     await this.readItems(show);
                     await replaceWallet();
                     task.commit(() => {
-                        this.lblResult.string = '配置读取完成。\n旧 Part 已释放，新 Part 读取共享余额。';
+                        this.lblResult.string = '配置读取完成。\n新 Part 准备完成后交接，继续显示共享余额。';
                     });
                 });
             },

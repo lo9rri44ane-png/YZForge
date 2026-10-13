@@ -92,9 +92,10 @@ const scroll=v._bindNodeList.getComponent(cc.ScrollView),before=scroll.getScroll
 v.list.scrollToIndex(4999,'nearest');check(Math.abs(before-scroll.getScrollOffset().y)<1,'Nearest moved a visible row');
 const target=scroll.content.children.find(n=>n.active&&n.getComponent('showcase.VirtualListItemPart')._bindLblTitle.string.includes('#5000'));
 check(target,'Grid row 5000 missing');
-const other=scroll.content.children.find(n=>n.active&&n!==target),otherLabel=other.getComponent('showcase.VirtualListItemPart')._bindLblTitle.string;
-v.list.updateItem(4999,{id:5000,title:'局部更新 #5000',revision:9});await v.list.whenIdle();
-check(other.active&&other.getComponent('showcase.VirtualListItemPart')._bindLblTitle.string===otherLabel,'Unrelated row rebound');
+const other=scroll.content.children.find(n=>n.active&&n!==target),beforeNodes=scroll.content.children.map(n=>n.uuid).sort();
+await click(p,'_bindBtnRefresh');await v.list.whenIdle();
+check(target.active&&other.active&&other.getComponent('showcase.VirtualListItemPart')._bindLblTitle.string.includes(' · v1'),'Same-key update did not render');
+check(JSON.stringify(beforeNodes)===JSON.stringify(scroll.content.children.map(n=>n.uuid).sort()),'Same-key data update recreated nodes');
 await wait(700);await click(p,'_bindBtnEvent');await wait(50);
 const live=scroll.content.children.filter(n=>n.active);check(live.every(n=>n.getComponent('showcase.VirtualListItemPart')._bindLblDetail.string.includes('广播 1')),'Stale subscriptions or missing current subscription');
 check(live.every(n=>n.getComponent('showcase.VirtualListItemPart')._bindLblTitle.getComponent(cc.UITransform).width<=n.getComponent(cc.UITransform).width),'Child Widget did not adapt after cell reuse');
@@ -139,14 +140,14 @@ v._bindNodeList.active=true;
 let releaseActivation,releaseCleanup,releaseParent,activation,lateCommit=true,renders=0,releaseNative,releaseNativeCleanup,nativeButton,nativeWrites=0;
 const activationGate=new Promise(resolve=>releaseActivation=resolve),cleanupGate=new Promise(resolve=>releaseCleanup=resolve),parentGate=new Promise(resolve=>releaseParent=resolve);
 const nativeGate=new Promise(resolve=>releaseNative=resolve),nativeCleanup=new Promise(resolve=>releaseNativeCleanup=resolve);
-v.list=v._bindNodeList.getComponent('yzforge.VirtualList').mount({owner:p.show.scope,assets:p.show.assets,prefab:{id:'showcase/default/prefab/prefabs/virtual-list-item-part',type:'Prefab'},part:cc.js.getClassByName('showcase.VirtualListItemPart'),layout:{itemWidth:scroll.view.width,itemHeight:88},render:(part,item)=>{
- renders++;part.render(item);
+v.list=v._bindNodeList.getComponent('yzforge.VirtualList').mount({owner:p.show.scope,assets:p.show.assets,prefab:{id:'showcase/default/prefab/prefabs/virtual-list-item-part',type:'Prefab'},part:cc.js.getClassByName('showcase.VirtualListItemPart'),key:row=>row.id,layout:{itemWidth:scroll.view.width,itemHeight:88},bind:(part,item)=>{
+ renders++;part.bind(item);
  if(renders===1){item.scope.defer(()=>cleanupGate);const n=new cc.Node('NativeButton');n.layer=part.node.layer;n.addComponent(cc.UITransform);part.node.addChild(n);nativeButton=n.addComponent(cc.js.getClassByName('yzforge.AsyncButton'));nativeButton.autoGuard=false;part.onActivate=current=>{activation=current;void current.run(async task=>{await activationGate;lateCommit=task.commit(()=>{part._bindLblTitle.string='过期';});}).catch(()=>{});};}
  else {part.onActivate=()=>{};item.scope.defer(()=>parentGate);}
 }});
 v.list.setItems([{id:1,title:'重新挂载',revision:0}]);await v.list.whenIdle();check(scroll.content.children.length===1,'Remount failed');
 const nativeRun=nativeButton.run(async task=>{task.scope.defer(()=>nativeCleanup);await nativeGate;task.commit(()=>nativeWrites++);}).catch(error=>check(error.code==='OPERATION_CANCELLED','原生子组件取消错误'));await wait(0);
-const retained=scroll.content.children[0];v.list.updateItem(0,{id:1,title:'复用后',revision:1});await wait(30);
+const retained=scroll.content.children[0];v.list.updateItem(0,{id:2,title:'复用后',revision:1});await wait(30);
 check(activation.signal.aborted&&renders===1&&!retained.active,'Part deactivation did not cancel immediately');
 releaseCleanup();await wait(30);check(renders===1,'Reused before actual Part activation task exited');
 releaseActivation();await wait(30);check(renders===1&&!nativeButton.lifetime.context,'复用未取消或等待原生子类');releaseNative();await wait(30);check(renders===1,'原生子类异步清理未完成就复用');releaseNativeCleanup();await v.list.whenIdle();await nativeRun;check(!lateCommit&&nativeWrites===0&&renders===2,'Part/native stale commit or reuse barrier failed');
@@ -154,8 +155,8 @@ const closing=v.list.dispose();await wait(30);check(cc.isValid(retained)&&!retai
 releaseParent();await closing;check(!cc.isValid(retained),'Prefab not reclaimed after cleanup');
 let releaseBrokenTask,brokenNode,brokenDeactivation,cancelBarrier,hookBarrier,brokenRenders=0;
 const brokenTask=new Promise(resolve=>releaseBrokenTask=resolve),cleanupErrors=[];
-v.list=v._bindNodeList.getComponent('yzforge.VirtualList').mount({owner:p.show.scope,assets:p.show.assets,prefab:{id:'showcase/default/prefab/prefabs/virtual-list-item-part',type:'Prefab'},part:cc.js.getClassByName('showcase.VirtualListItemPart'),layout:{itemWidth:scroll.view.width,itemHeight:88},onError:error=>cleanupErrors.push(error),render:(part,item)=>{
- part.render(item);brokenRenders++;
+v.list=v._bindNodeList.getComponent('yzforge.VirtualList').mount({owner:p.show.scope,assets:p.show.assets,prefab:{id:'showcase/default/prefab/prefabs/virtual-list-item-part',type:'Prefab'},part:cc.js.getClassByName('showcase.VirtualListItemPart'),key:row=>row.id,layout:{itemWidth:scroll.view.width,itemHeight:88},onError:error=>cleanupErrors.push(error),bind:(part,item)=>{
+ part.bind(item);brokenRenders++;
  if(brokenRenders===1){brokenNode=part.node;part.onActivate=current=>{current.signal.onAbort(()=>{cancelBarrier=part.__deactivate();});void current.run(()=>brokenTask).catch(()=>{});};part.onDeactivate=()=>{hookBarrier=part.__deactivate();throw Error('virtual-list-test: Part cleanup failure');};}
 }});
 v.list.setItems([{id:1,title:'清理异常',revision:0}]);await v.list.whenIdle();

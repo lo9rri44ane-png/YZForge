@@ -142,6 +142,14 @@ export function allowInstanceComponents(root: Node, owner: Scope): void {
     if (host) host.allow(owner);
 }
 
+/** @internal 动态 Part 也按原生控件准备后再激活业务组件，新增组件同时接入。 */
+export async function prepareInstanceComponents(root: Node, owner: Scope): Promise<void> {
+    const host = hosts.get(root);
+    host?.begin(owner);
+    root.active = true;
+    if (host) await host.adopt(root, owner, host.context.id);
+}
+
 /** @internal 注册普通 TypeScript 生命周期对象；不会向节点添加组件。 */
 export function registerComponentBinding(component: Component, binding: ComponentBinding): void {
     nativeBindings.set(component, binding);
