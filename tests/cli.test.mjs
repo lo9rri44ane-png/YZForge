@@ -231,6 +231,19 @@ test('PinK 身份验证先于凭据发送，输出不包含连接凭据', async 
     assert.doesNotMatch(JSON.stringify(status), /secret-test-token|private-session/);
     assert.deepEqual(requests[0].options.headers, {});
     assert.equal(requests[1].options.headers.authorization, 'Bearer secret-test-token');
+    const conflict = await runCommand(['doctor'], f.root, {
+        fetchImpl,
+        queryProcesses: async () => ({
+            state: 'checked',
+            processes: [{ ProcessId: 12, CommandLine: `CocosCreator.exe --project "${f.root}" --token=hidden` }],
+        }),
+    });
+    assert.equal(conflict.ok, false);
+    assert.equal(conflict.status, 'failed');
+    assert.ok(
+        conflict.diagnostics.some((item) => item.code === 'YZ_PINK_EDITOR_CONFLICT' && item.severity === 'error'),
+    );
+    assert.doesNotMatch(JSON.stringify(conflict), /secret-test-token|private-session|--token=hidden/);
     requests.length = 0;
     identity.projectKey = 'wrong';
     await assert.rejects(inspectPink(f.root, { fetchImpl }), { code: 'YZ_PINK_IDENTITY' });

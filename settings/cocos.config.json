@@ -1,0 +1,196 @@
+{
+    "builder": {
+        "bundleConfig": {
+            "custom": {
+                "yzforge-code": {
+                    "displayName": "YZForge 代码配置",
+                    "configs": {
+                        "miniGame": {
+                            "preferredOptions": {
+                                "isRemote": false,
+                                "compressionType": "subpackage"
+                            },
+                            "fallbackOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "configMode": "overwrite",
+                            "overwriteSettings": {
+                                "alipay-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "bytedance-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "honor-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "huawei-quick-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "migu-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "oppo-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "taobao-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "vivo-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "wechatgame": {
+                                    "compressionType": "subpackage"
+                                },
+                                "xiaomi-quick-game": {
+                                    "compressionType": "subpackage"
+                                }
+                            }
+                        },
+                        "web": {
+                            "preferredOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "fallbackOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "configMode": "auto"
+                        },
+                        "native": {
+                            "preferredOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "fallbackOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "configMode": "auto"
+                        }
+                    }
+                },
+                "yzforge-resources": {
+                    "displayName": "YZForge 资源配置",
+                    "configs": {
+                        "miniGame": {
+                            "preferredOptions": {
+                                "isRemote": false,
+                                "compressionType": "subpackage"
+                            },
+                            "fallbackOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "configMode": "overwrite",
+                            "overwriteSettings": {
+                                "alipay-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "bytedance-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "honor-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "huawei-quick-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "migu-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "oppo-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "taobao-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "vivo-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "wechatgame": {
+                                    "compressionType": "subpackage"
+                                },
+                                "xiaomi-quick-game": {
+                                    "compressionType": "subpackage"
+                                }
+                            }
+                        },
+                        "web": {
+                            "preferredOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "fallbackOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "configMode": "auto"
+                        },
+                        "native": {
+                            "preferredOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "fallbackOptions": {
+                                "isRemote": false,
+                                "compressionType": "merge_dep"
+                            },
+                            "configMode": "auto"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "engine": {
+        "configs": {
+            "defaultConfig": {
+                "name": "Default Config",
+                "includeModules": [
+                    "2d",
+                    "affine-transform",
+                    "animation",
+                    "audio",
+                    "base",
+                    "custom-pipeline",
+                    "dragon-bones",
+                    "gfx-webgl",
+                    "gfx-webgl2",
+                    "graphics",
+                    "intersection-2d",
+                    "mask",
+                    "particle-2d",
+                    "physics-2d-box2d",
+                    "profiler",
+                    "rich-text",
+                    "spine-3.8",
+                    "tiled-map",
+                    "tween",
+                    "ui",
+                    "video",
+                    "webview"
+                ],
+                "noDeprecatedFeatures": {
+                    "value": false,
+                    "version": ""
+                },
+                "flags": {}
+            }
+        },
+        "globalConfigKey": "defaultConfig",
+        "designResolution": {
+            "width": 720,
+            "height": 1280,
+            "fitWidth": true,
+            "fitHeight": true
+        }
+    },
+    "scene": {
+        "tick": false
+    },
+    "version": "1.0.0",
+    "$schema": "../temp/cocos.config.schema.json"
+}

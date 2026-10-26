@@ -2,7 +2,7 @@
 
 当前 PinK 开发使用 [命令工作流](pink-workflow.md)。下文 Creator 工作台、MCP 和 Inspector 的说明属于尚待替换的旧入口，不是 PinK 的操作步骤。启动配置以 `project-settings/game-config.json` 为唯一来源。
 
-适用于本仓库及其项目副本。Creator 3.8.8；Node.js 22.13+（22.x）或 24+。代码质量工具属于开发依赖，不进入游戏运行包；版本要求以 [package.json](../package.json) 为准。
+适用于本仓库及其项目副本。当前目标为 PinK 配套 Cocos 4.0.0-beta.0 / CLI 0.2.0-beta.0；Node.js 22.13+（22.x）或 24+。代码质量工具属于开发依赖，不进入游戏运行包；版本要求以 [package.json](../package.json) 为准。打开项目后先执行 `npm run yz -- doctor` 核对缓存来源和编辑器冲突；其诊断范围与项目配置归属见 [PinK 工作流](pink-workflow.md)。
 
 ## 安装
 
