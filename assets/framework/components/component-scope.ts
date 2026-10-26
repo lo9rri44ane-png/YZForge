@@ -25,6 +25,10 @@ export class ComponentScope implements ComponentBinding {
     get bound(): boolean {
         return !!this.instance;
     }
+    /** 在登记异步回调时捕获当前出口，避免旧绑定的迟到故障归到下一位 owner。 */
+    get report() {
+        return this.binding?.report ?? this.instance?.report ?? this.activation?.report ?? reportError;
+    }
     context?: ComponentContext;
     binding?: Scope;
     private readonly bindings = new Set<Scope>();
@@ -48,14 +52,14 @@ export class ComponentScope implements ComponentBinding {
         invariant(!this.instance, 'COMPONENT_ALREADY_BOUND', this.component.name);
         this.instance = instance;
         this.module = context;
-        void this.__deactivate().catch(reportError);
+        void this.__deactivate().catch(this.report);
         instance.signal.onAbort(() => this.__allow(undefined));
         instance.defer(() => this.__deactivate());
     }
 
     __allow(owner: Scope | undefined): void {
         this.owner = owner;
-        if (!owner) void this.__deactivate().catch(reportError);
+        if (!owner) void this.__deactivate().catch(this.report);
         else this.activate();
     }
 
@@ -66,7 +70,7 @@ export class ComponentScope implements ComponentBinding {
 
     disable(): void {
         this.enabled = false;
-        void this.__deactivate().catch(reportError);
+        void this.__deactivate().catch(this.report);
     }
 
     destroy(): void {
@@ -114,7 +118,7 @@ export class ComponentScope implements ComponentBinding {
             ...this.module?.componentServices(scope, () => this.activation === scope),
         });
         scope.signal.onAbort(() => {
-            void this.__deactivate().catch(reportError);
+            void this.__deactivate().catch(this.report);
         });
         try {
             if (!this.binding || this.binding.signal.aborted) {
@@ -122,13 +126,13 @@ export class ComponentScope implements ComponentBinding {
                 if (done) {
                     this.preparation = { scope, done };
                     void done.catch((error) => {
-                        if (!(error instanceof OperationCancelled)) reportError(error);
+                        if (!(error instanceof OperationCancelled)) scope.report(error);
                     });
                 }
             }
         } catch (error) {
             this.enabled = false;
-            void this.__deactivate().catch(reportError);
+            void this.__deactivate().catch(this.report);
             throw error;
         }
     }
@@ -142,7 +146,7 @@ export class ComponentScope implements ComponentBinding {
         owner.signal.throwIfAborted();
         invariant(isValid(this.component, true) && !this.disposed, 'UI_COMPONENT_DESTROYED', '组件已销毁');
         invariant(!this.draining, 'UI_COMPONENT_DRAINING', '组件仍在等待上次停用清理，请在重新启用完成后绑定');
-        void this.clear().catch(reportError);
+        void this.clear().catch(this.report);
         const scope = owner.child(label);
         this.binding = scope;
         this.bindings.add(scope);
@@ -153,7 +157,7 @@ export class ComponentScope implements ComponentBinding {
             try {
                 if (this.binding === scope) reset();
             } finally {
-                void scope.close().catch(reportError);
+                void scope.close().catch(scope.report);
             }
         });
         return scope;

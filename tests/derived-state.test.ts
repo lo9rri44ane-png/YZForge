@@ -61,6 +61,65 @@ test('derived equality preserves branches; disposal detaches inputs and freeze r
     await owner.close();
 });
 
+test('equal upstream values stop downstream computation, notification and resource preparation', async () => {
+    const owner = new Scope('equal-branch');
+    const source = new State({ id: 1, coins: 0 });
+    const selected = derive(owner, [source.readonly], (s) => [s.id], { equals: (a, b) => a[0] === b[0] });
+    let calculations = 0,
+        notifications = 0,
+        preparations = 0;
+    const detail = derive(owner, [selected], (ids) => {
+        calculations++;
+        return { id: ids[0] };
+    });
+    detail.subscribe(owner, () => {
+        notifications++;
+    });
+    new StateBindings(owner).prepare(detail, (value) => value, {
+        prepare: () => {
+            preparations++;
+        },
+        render: () => {},
+    });
+    await flush();
+    source.set({ id: 1, coins: 2 });
+    await flush();
+    assert.deepEqual([calculations, notifications, preparations], [1, 1, 1]);
+    source.set({ id: 2, coins: 2 });
+    await flush();
+    assert.deepEqual([calculations, notifications, preparations], [2, 2, 2]);
+    await owner.close();
+});
+
+test('equal branches do not hide changes on other diamond inputs or batched read-through', async () => {
+    const owner = new Scope('mixed-diamond');
+    const source = new State(1);
+    const parity = derive(owner, [source.readonly], (n) => n % 2);
+    const twice = derive(owner, [source.readonly], (n) => n * 2);
+    let runs = 0;
+    const joined = derive(owner, [parity, twice], (a, b) => {
+        runs++;
+        return [a, b];
+    });
+    const seen: unknown[] = [];
+    joined.subscribe(owner, (value) => {
+        seen.push(value);
+    });
+    batch(() => {
+        source.set(3);
+        assert.deepEqual(joined.value, [1, 6]);
+        source.set(5);
+    });
+    assert.deepEqual(seen, [
+        [1, 2],
+        [1, 10],
+    ]);
+    assert.equal(runs, 3);
+    source.set(6);
+    assert.deepEqual(seen.at(-1), [0, 12]);
+    await owner.close();
+});
+
 test('derived errors stop the affected graph, isolate unrelated observers and reject impure calculations', async () => {
     const owner = new Scope('failure'),
         source = new State(0),

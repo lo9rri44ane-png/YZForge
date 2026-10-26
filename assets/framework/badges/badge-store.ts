@@ -1,5 +1,5 @@
 import type { Lifetime } from '../core/scope';
-import { invariant, type ErrorReporter, reportError } from '../core/errors';
+import { invariant, type ErrorReporter } from '../core/errors';
 
 /** 红点的稳定业务标识；同一 id 表示同一节点，与 UI 节点名和列表索引无关。 */
 export interface BadgeKey {
@@ -48,7 +48,7 @@ export class BadgeStore {
     /** 创建一个状态域；owner 结束时清除全部节点和订阅，账号切换应更换状态域或结束其注册所有者。 */
     constructor(
         owner: Lifetime,
-        private readonly report: ErrorReporter = reportError,
+        private readonly report: ErrorReporter = owner.report,
     ) {
         owner.signal.throwIfAborted();
         owner.signal.onAbort(() => {

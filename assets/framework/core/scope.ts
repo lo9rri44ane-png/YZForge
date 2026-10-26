@@ -1,12 +1,16 @@
 import { CancellationSource, CancellationSignal } from './cancellation';
-import { ErrorReporter, FrameworkError, OperationCancelled, reportError } from './errors';
+import { ErrorReporter, FrameworkError, OperationCancelled, reportError, errorReporter } from './errors';
 type Cleanup = () => void | Promise<void>;
+let nextScopeId = 0;
+let nextTaskId = 0;
 /**
  * 借用一段使用期限：可以登记清理、创建自己拥有的子期限，但不能结束宿主。
  * show.scope、activation.scope、ctx.scope 均使用此接口。需要提前结束一组工作时，
  * 用 child 创建自己的 Scope；页面关闭使用 show.dismiss/finish/back。
  */
 export interface Lifetime {
+    /** 随宿主传递的隔离错误出口；自动附带 Scope 身份。 */
+    readonly report: ErrorReporter;
     /** 宿主结束时发出的取消信号。 */
     readonly signal: CancellationSignal;
     /** 为当前使用期登记清理；返回函数只撤销登记。 */
@@ -25,12 +29,24 @@ export function scopeOwner(lifetime: Lifetime): Scope {
 }
 /** 使用期限的只读诊断快照，不包含任务、节点或资源对象本身。 */
 export interface ScopeSnapshot {
+    readonly id: number;
     /** 创建时的诊断名称。 */
     readonly label: string;
     /** active 可工作；cancelled 已取消；closing 正在等待；closed 已完成清理。 */
     readonly state: 'active' | 'cancelled' | 'closing' | 'closed';
-    /** 尚未完成的任务名称；同名表示多个独立任务。 */
-    readonly tasks: readonly string[];
+    /** 诊断时钟的毫秒时间戳；默认设备时间，不用于业务结算。 */
+    readonly startedAtMs: number;
+    readonly cancelledAtMs?: number;
+    /** 关闭等待所在阶段；清理中也可据此定位没有退出的回调。 */
+    readonly closingPhase?: 'tasks' | 'children' | 'cleanup';
+    readonly cleanupStartedAtMs?: number;
+    readonly tasks: readonly {
+        readonly id: number;
+        readonly label: string;
+        readonly startedAtMs: number;
+        readonly elapsedMs: number;
+        readonly cancellingForMs?: number;
+    }[];
     /** 尚未执行的清理回调数量，不等同于资源数量。 */
     readonly cleanupCount: number;
     /** 当前仍被持有的子期限，已完整关闭的子级会移除。 */
@@ -45,6 +61,8 @@ export interface ScopeSnapshot {
  * try { await app.modules.use(InventoryModule, owner); } finally { await owner.close(); }
  */
 export class Scope {
+    readonly id = ++nextScopeId;
+    readonly report: ErrorReporter;
     /** 不暴露宿主关闭权限的稳定入口；同一 Scope 始终返回同一个对象。 */
     readonly lifetime: Lifetime;
     /**
@@ -53,11 +71,15 @@ export class Scope {
     readonly signal: CancellationSignal;
     private readonly source: CancellationSource;
     private readonly children = new Set<Scope>();
-    private readonly tasks = new Map<Promise<unknown>, string>();
+    private readonly tasks = new Map<Promise<unknown>, { id: number; label: string; startedAtMs: number }>();
     private readonly cleanups = new Set<Cleanup>();
     private parent?: Scope;
     private closing?: Promise<void>;
     private ended = false;
+    private readonly startedAtMs: number;
+    private cancelledAtMs?: number;
+    private closingPhase?: ScopeSnapshot['closingPhase'];
+    private cleanupStartedAtMs?: number;
     /**
      * 创建独立期限；需要跟随父级结束时优先使用 parent.child(label)。
      * @param label 日志和错误中的调试名称。
@@ -68,11 +90,15 @@ export class Scope {
          * 用于日志和诊断的名称，不作为业务对象的唯一标识。
          */
         readonly label: string,
-        private readonly report: ErrorReporter = reportError,
+        report: ErrorReporter = reportError,
+        private readonly now: () => number = Date.now,
     ) {
-        this.source = new CancellationSource(report);
+        this.startedAtMs = now();
+        this.report = errorReporter(report, { scopeId: this.id, scope: label });
+        this.source = new CancellationSource(this.report);
         this.signal = this.source.signal;
         this.lifetime = Object.freeze({
+            report: this.report,
             signal: this.signal,
             defer: (cleanup: Cleanup) => this.defer(cleanup),
             child: (label: string) => this.child(label),
@@ -103,7 +129,7 @@ export class Scope {
      */
     child(label: string): Scope {
         this.signal.throwIfAborted();
-        const child = new Scope(`${this.label}/${label}`, this.report);
+        const child = new Scope(`${this.label}/${label}`, this.report, this.now);
         child.parent = this;
         this.children.add(child);
         child.defer(() => {
@@ -133,6 +159,7 @@ export class Scope {
      */
     cancel(reason = new OperationCancelled(`Scope ended: ${this.label}`)): void {
         if (this.signal.aborted) return;
+        this.cancelledAtMs = this.now();
         this.source.cancel(reason);
         for (const child of Array.from(this.children)) child.cancel(reason);
     }
@@ -144,7 +171,8 @@ export class Scope {
      */
     track<T>(task: Promise<T>, label = 'task'): Promise<T> {
         this.signal.throwIfAborted();
-        this.tasks.set(task, label);
+        if (this.tasks.has(task)) return task;
+        this.tasks.set(task, { id: ++nextTaskId, label, startedAtMs: this.now() });
         task.then(
             () => this.tasks.delete(task),
             () => this.tasks.delete(task),
@@ -172,7 +200,9 @@ export class Scope {
     private async drain(): Promise<void> {
         const failures: unknown[] = [];
         // Descendant resources remain pinned while ancestor tasks may still touch them.
+        this.closingPhase = 'tasks';
         const tasks = await this.drainTasks();
+        this.closingPhase = 'children';
         const settled = [
             ...tasks,
             ...(await Promise.allSettled(Array.from(this.children).map((child) => child.close()))),
@@ -181,6 +211,8 @@ export class Scope {
             if (result.status === 'rejected' && !(result.reason instanceof OperationCancelled))
                 failures.push(result.reason);
         for (const cleanup of Array.from(this.cleanups).reverse()) {
+            this.closingPhase = 'cleanup';
+            this.cleanupStartedAtMs = this.now();
             try {
                 await cleanup();
             } catch (error) {
@@ -188,6 +220,8 @@ export class Scope {
             }
         }
         this.cleanups.clear();
+        this.closingPhase = undefined;
+        this.cleanupStartedAtMs = undefined;
         this.ended = true;
         if (failures.length)
             throw new FrameworkError('SCOPE_CLEANUP_FAILED', `Cleanup failed: ${this.label}`, { failures });
@@ -214,10 +248,25 @@ export class Scope {
     }
     /** 读取谁在阻止清理；快照不延长任务或资源的使用期限，也不能用于修改框架内部状态。 */
     inspect(): ScopeSnapshot {
+        const now = this.now();
         return Object.freeze({
+            id: this.id,
             label: this.label,
+            startedAtMs: this.startedAtMs,
+            cancelledAtMs: this.cancelledAtMs,
+            closingPhase: this.closingPhase,
+            cleanupStartedAtMs: this.cleanupStartedAtMs,
             state: this.ended ? 'closed' : this.closing ? 'closing' : this.signal.aborted ? 'cancelled' : 'active',
-            tasks: Object.freeze(Array.from(this.tasks.values())),
+            tasks: Object.freeze(
+                Array.from(this.tasks.values(), (task) =>
+                    Object.freeze({
+                        ...task,
+                        elapsedMs: Math.max(0, now - task.startedAtMs),
+                        cancellingForMs:
+                            this.cancelledAtMs === undefined ? undefined : Math.max(0, now - this.cancelledAtMs),
+                    }),
+                ),
+            ),
             cleanupCount: this.cleanups.size,
             children: Object.freeze(Array.from(this.children, (child) => child.inspect())),
         });

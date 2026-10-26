@@ -1,7 +1,7 @@
 import { _decorator, Component, director } from 'cc';
 import { App, AppOptions } from './app';
 import { assertLifecycle } from '../components/lifecycle';
-import { reportError } from '../core/errors';
+import { reportError, errorReporter } from '../core/errors';
 import { BootContext } from './boot';
 import { OperationCancelled } from '../core/errors';
 const { ccclass } = _decorator;
@@ -16,6 +16,7 @@ export class AppEntry extends Component {
     protected app?: App;
     private ended = false;
     private starting?: Promise<void>;
+    private report = errorReporter(reportError, { source: 'app-entry' });
     /**
      * 项目启动脚本必须重写，提供模块清单、发布清单、UI 根节点等装配参数。
      * @returns 创建 App 的配置。
@@ -40,7 +41,11 @@ export class AppEntry extends Component {
         this.starting = Promise.resolve()
             .then(async () => {
                 if (this.ended) throw new OperationCancelled('App entry ended');
-                if (!this.app) this.app = await App.create(this.appOptions(), onCleaning);
+                if (!this.app) {
+                    const options = this.appOptions();
+                    this.report = errorReporter(options.onError, { source: 'app-entry' });
+                    this.app = await App.create(options, onCleaning);
+                }
                 if (this.ended) {
                     await this.app.close();
                     throw new OperationCancelled('App entry ended');
@@ -62,7 +67,7 @@ export class AppEntry extends Component {
      * @param error 原始启动错误。
      */
     protected onBootFailed(error: unknown): void {
-        reportError(error);
+        this.report(error);
     }
     /**
      * @internal
@@ -91,7 +96,7 @@ export class AppEntry extends Component {
             .catch((error) => {
                 if (!(error instanceof OperationCancelled)) this.onBootFailed(error);
             })
-            .catch(reportError);
+            .catch((error) => this.report(error));
     }
     /**
      * @internal
@@ -99,6 +104,6 @@ export class AppEntry extends Component {
      */
     onDestroy(): void {
         this.ended = true;
-        if (this.app) void this.app.close().catch(reportError);
+        if (this.app) void this.app.close().catch(this.report);
     }
 }

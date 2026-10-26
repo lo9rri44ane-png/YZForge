@@ -30,9 +30,11 @@ ESLint、TypeScript ESLint、Prettier 及配套依赖使用精确版本和 packa
 | 测试夹具                            | 仅 tests 下允许显式 any，以构造残缺上下文或错误输入；运行时代码仍检查                                       |
 | 编辑器环境                          | Node 工具、Creator 主进程/场景进程、面板分别声明全局变量                                                    |
 
-异步工作应 await，或明确使用 `void operation().catch(reportError)`。仅写 void 不会处理失败。引擎生命周期与框架依赖方向仍由 `npm run check` 检查，ESLint 不替代这些架构规则。
+异步工作应 await；有使用期限的业务代码也可明确使用 `void operation().catch(owner.report)`，将故障交给该 Scope 的错误出口。仅写 void 不会处理失败。引擎生命周期与框架依赖方向仍由 `npm run check` 检查，ESLint 不替代这些架构规则。
 
 `.prettierrc.json` 是格式规则来源，`.editorconfig` 为其他编辑器提供相同基础规则。工作台新建模块、UI、普通脚本、Binding，以及 CLI 生成的 TS 都调用同一份 Prettier 配置；生成器先格式化再比较内容和计算文件摘要，重复生成不会因缩进反复产生差异。
+
+`.gitattributes` 固定脚本、JSON、Markdown 和 YAML 的 LF 换行，避免不同 Git 客户端的 `core.autocrlf` 设置影响格式检查与生成摘要。场景、预制体和 meta 保留仓库中的原始字节，由 Creator / AssetDB 维护。
 
 `.prettierignore` 和 ESLint 排除 Creator 缓存、构建输出、第三方依赖及生成产物。生成 TS 由生成流程格式化，生成 JSON 保持生成器规定的输出；命令行批量格式化不会重写 scene、prefab、meta 或生成数据。VS Code 将这些引擎资产与生成文件标为只读，日常通过 Creator 或工作台修改。
 
@@ -68,18 +70,24 @@ ESLint、TypeScript ESLint、Prettier 及配套依赖使用精确版本和 packa
 
 ## 常用命令与快捷入口
 
-| 命令                  | 用途                                              |
-| --------------------- | ------------------------------------------------- |
-| npm run lint          | ESLint 检查，错误或警告均返回失败                 |
-| npm run lint:fix      | 自动修复能够安全修复的问题；其余问题仍需处理      |
-| npm run format        | 格式化受管理的手写代码与文本                      |
-| npm run format:check  | 检查格式，不修改文件                              |
-| npm run typecheck     | 游戏/框架脚本及类型合同两套 TypeScript 检查       |
-| npm run check         | 生命周期/模块/生成产物一致性检查                  |
-| npm run generate      | 生成目录、配置与类型；需回收旧文件时使用工作台    |
-| npm test              | 自动化测试                                        |
-| npm run test:showcase | 单独运行示例业务测试，需要保留示例模块            |
-| npm run verify        | 依次执行 ESLint、格式、类型、框架检查与自动化测试 |
+| 命令                                        | 用途                                                                               |
+| ------------------------------------------- | ---------------------------------------------------------------------------------- |
+| npm run lint                                | ESLint 检查，错误或警告均返回失败                                                  |
+| npm run lint:fix                            | 自动修复能够安全修复的问题；其余问题仍需处理                                       |
+| npm run format                              | 格式化受管理的手写代码与文本                                                       |
+| npm run format:check                        | 检查格式，不修改文件                                                               |
+| npm run typecheck                           | 游戏/框架脚本及类型合同两套 TypeScript 检查                                        |
+| npm run check                               | 生命周期/模块/生成产物一致性检查                                                   |
+| npm run generate                            | 生成目录、配置与类型；需回收旧文件时使用工作台                                     |
+| npm test                                    | 自动化测试                                                                         |
+| npm run test:showcase                       | 单独运行示例业务测试，需要保留示例模块                                             |
+| npm run verify                              | 依次执行 ESLint、格式、类型、框架检查与自动化测试                                  |
+| npm run verify:node                         | 无 Creator 环境的工具/测试 ESLint、全仓库格式、框架/工具与现存示例测试，并保存报告 |
+| npm run verify:creator -- --url 当前项目URL | 完整静态检查、测试和默认 Creator 集成组，并保存报告                                |
+| npm run benchmark:node                      | 记录派生状态与十万条列表控制器基线                                                 |
+| npm run benchmark:runtime -- 当前项目URL    | 记录真实页面打开、滚动和资源回落基线                                               |
+
+`verify:node` 不使用 `temp` 类型声明，不执行游戏/框架脚本的类型感知 ESLint、TypeScript 或依赖/生成一致性检查；这些由 `verify` 或 `verify:creator` 执行。CI 在 Windows、macOS、Linux 的 Node 22/24 上执行 Node 层，保存 `.yzforge/verification/` 日志与 JSON 报告。Creator 层仍需已导入的项目、MCP 和当前预览/构建 URL，不能以 Node CI 通过代替。性能比较与报告说明见[实现范围与验证](implementation-status.md#性能基线)。
 
 **Ctrl+Shift+B** 调用完整检查；“终端 → 运行任务”可单独格式化、修复、导出或测试。脚本错误会进入 VS Code 的问题列表。
 

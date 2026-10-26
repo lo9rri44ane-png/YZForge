@@ -1,5 +1,5 @@
 import type { Lifetime } from '../core/scope';
-import { invariant, reportError } from '../core/errors';
+import { invariant } from '../core/errors';
 
 /** 一次目标注册的只读租约；相同 Key 重新注册不会让旧租约重新有效。 */
 export interface GuideTarget<T> {
@@ -37,7 +37,7 @@ export class GuideTargets<T> {
         });
         for (const notify of Array.from(this.waiters.get(key) ?? [])) notify(target);
         return () => {
-            void scope.close().catch(reportError);
+            void scope.close().catch(scope.report);
         };
     }
     /** 返回当前有效目标；未出现或已注销时返回 undefined。 */

@@ -1,8 +1,16 @@
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { runVerification } from '../../tools/yzforge/validation/verification.mjs';
 
 const groups = {
+    diagnostics: {
+        description: '应用错误出口、任务诊断、上报故障隔离；需默认启动场景',
+        files: ['verify-observability.mjs'],
+    },
+    performance: {
+        description: '真实列表打开/滚动耗时与预热后资源回落；需展示模块',
+        files: ['verify-performance.mjs'],
+    },
     presentation: {
         description: '状态绑定、首屏/清理屏障、组件准备顺序、双皮肤与缓存重开；需 workshop 示例',
         files: ['verify-presentation.mjs', 'verify-composition.mjs', 'verify-preparation-tree.mjs'],
@@ -57,23 +65,13 @@ async function main() {
     // 旧的构建回归入口仅接受 IPv4 回环；统一后所有功能组使用同一地址。
     if (url.hostname === 'localhost') url.hostname = '127.0.0.1';
     const files = [...new Set(selected.flatMap((name) => groups[name].files))];
-    const started = Date.now();
-    for (const [index, file] of files.entries()) {
-        console.log(`\n[${index + 1}/${files.length}] ${file}`);
-        await new Promise((resolve, reject) => {
-            const child = spawn(process.execPath, [fileURLToPath(new URL(file, import.meta.url)), url.href], {
-                cwd: fileURLToPath(new URL('../../', import.meta.url)),
-                stdio: 'inherit',
-                windowsHide: true,
-            });
-            child.once('error', reject);
-            child.once('exit', (code, signal) => {
-                if (code === 0) resolve();
-                else reject(Error(`${file} 失败（${signal ?? code}），已停止后续检查。`));
-            });
-        });
-    }
-    console.log(`\nPASS: ${files.length} 个集成脚本，${((Date.now() - started) / 1000).toFixed(1)} 秒。`);
+    await runVerification(
+        fileURLToPath(new URL('../../', import.meta.url)),
+        'integration',
+        files.map((file) => ({ name: file, args: [fileURLToPath(new URL(file, import.meta.url)), url.href] })),
+        { groups: selected, url: url.href },
+    );
+    console.log(`PASS: ${files.length} 个集成脚本。`);
 }
 
 main().catch((error) => {

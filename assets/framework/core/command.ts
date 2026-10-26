@@ -1,4 +1,4 @@
-import { invariant, OperationCancelled, reportError, type ErrorReporter } from './errors';
+import { invariant, OperationCancelled, type ErrorReporter } from './errors';
 import { runTask, type Lifetime, type Scope, type TaskContext } from './scope';
 import { batch, snapshot, State, reportObserverError, type ReadonlyState, type Snapshot } from './state';
 
@@ -127,7 +127,7 @@ export class Command<A, R, C = void> {
             rejectDone = no;
         });
         void result.catch(() => {});
-        void completed.catch((error) => reportObserverError(this.options.onCleanupError ?? reportError, error));
+        void completed.catch((error) => reportObserverError(this.options.onCleanupError ?? scope.report, error));
         let settled = false,
             started = false,
             closing = false;

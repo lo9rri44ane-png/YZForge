@@ -5,7 +5,7 @@ import { Assets } from '../assets/asset-manager';
 import { destroyNode } from '../assets/node-lifetime';
 import { AssetKey } from '../assets/asset-types';
 import { ClockDriver } from '../core/clock-driver';
-import { invariant, OperationCancelled, reportError } from '../core/errors';
+import { invariant, OperationCancelled } from '../core/errors';
 import { Scope, Lifetime } from '../core/scope';
 type Playing = {
     source: AudioSource;
@@ -108,7 +108,7 @@ export class AudioManager {
         this.loading.add(scope);
         const sequence = channel === 'bgm' ? ++this.bgmSequence : 0;
         if (channel === 'bgm') {
-            if (this.pendingBgm) void this.pendingBgm.close().catch(reportError);
+            if (this.pendingBgm) void this.pendingBgm.close().catch(this.scope.report);
             this.pendingBgm = scope;
         }
         try {
@@ -176,7 +176,7 @@ export class AudioManager {
                 return stopping;
             };
             const naturalEnd = () => {
-                void finish('ended').catch(reportError);
+                void finish('ended').catch(this.scope.report);
             };
             let off = () => {};
             off = scope.signal.onAbort(() => {

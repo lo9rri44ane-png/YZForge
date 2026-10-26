@@ -260,7 +260,7 @@ export class ModuleManager {
     }
     private readonly definitions = new Map<string, ModuleDefinition>();
     private readonly records = new Map<string, ModuleRecord>();
-    private readonly codeScope = new Scope('module-code');
+    private readonly codeScope: Scope;
     private readonly factories = new Map<string, Promise<ModuleFactory>>();
     private readonly loadedCode = new Set<string>();
     private accepting = true;
@@ -298,6 +298,7 @@ export class ModuleManager {
         private readonly report: ErrorReporter = reportError,
         private readonly cleanupTimeoutMs = 10000,
     ) {
+        this.codeScope = new Scope('module-code', report);
         for (const definition of definitions) {
             invariant(!this.definitions.has(definition.id), 'MODULE_DUPLICATE', definition.id);
             this.definitions.set(definition.id, definition);

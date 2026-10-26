@@ -212,7 +212,10 @@ test('diagnostics identify pending work and resource owners without extending th
     const snapshot = cache.inspect();
     assert.equal(snapshot[0].owners[0].label, 'page');
     assert.equal(snapshot[0].owners[0].state, 'closing');
-    assert.deepEqual(snapshot[0].owners[0].tasks, ['load-details']);
+    assert.deepEqual(
+        snapshot[0].owners[0].tasks.map((task) => task.label),
+        ['load-details'],
+    );
     assert.ok(Object.isFrozen(snapshot[0].owners[0].tasks));
     gate.resolve();
     await task;

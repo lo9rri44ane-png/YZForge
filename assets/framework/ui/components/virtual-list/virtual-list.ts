@@ -1,7 +1,7 @@
 import { _decorator, Component, isValid, Layout, Node, ScrollView, UITransform, Vec2, Widget } from 'cc';
 import type { AssetAccess } from '../../../assets/asset-access';
 import type { GameComponent } from '../../../components/game-component';
-import { type ErrorReporter, invariant, reportError } from '../../../core/errors';
+import { type ErrorReporter, invariant, reportError, errorReporter } from '../../../core/errors';
 import type { Lifetime } from '../../../core/scope';
 import { VirtualListController, type VirtualListSnapshot } from './virtual-list-controller';
 import { PartPresentation, type PartOptions, type PartCell } from '../../part-presentation';
@@ -94,6 +94,7 @@ export interface VirtualListHandle<T> {
 @disallowMultiple
 export class VirtualList extends Component {
     private session?: { dispose(): Promise<void> };
+    private report: ErrorReporter = reportError;
 
     /**
      * 装配业务 Part 工厂并建立列表会话，之后通过返回的 handle 传入数据。
@@ -123,7 +124,8 @@ export class VirtualList extends Component {
             'Content 必须使用单位缩放且不旋转',
         );
         type Cell = PartCell<Part>;
-        const report = options.onError ?? reportError;
+        const report = errorReporter(options.onError ?? options.owner.report);
+        this.report = report;
         const owner = options.owner.child('virtual-list-mount');
         try {
             const release = claimProperties(content, ['children']);
@@ -293,10 +295,10 @@ export class VirtualList extends Component {
     }
     /** @internal 引擎禁用时结束列表，清理完成后可以重新 mount。 */
     onDisable(): void {
-        void this.session?.dispose().catch(reportError);
+        void this.session?.dispose().catch(this.report);
     }
     /** @internal 引擎销毁时再次保证会话结束，dispose 保持幂等。 */
     onDestroy(): void {
-        void this.session?.dispose().catch(reportError);
+        void this.session?.dispose().catch(this.report);
     }
 }

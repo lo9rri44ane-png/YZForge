@@ -21,6 +21,10 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "verify": "npm run lint && npm run format:check && npm run typecheck && npm run check && npm test",
+    "verify:node": "node tools/yzforge/verify.mjs --tier node",
+    "verify:creator": "node tools/yzforge/verify.mjs --tier creator",
+    "benchmark:node": "node --import ./tools/yzforge/register-tests.mjs tests/performance/node.mjs",
+    "benchmark:runtime": "node tests/integration/verify-performance.mjs",
     "test:showcase": "node --import ./tools/yzforge/register-tests.mjs --test tests/examples/*.test.ts",
     "test:integration": "node tests/integration/run.mjs"
   },

@@ -1,4 +1,4 @@
-import { OperationCancelled, type ErrorReporter, reportError } from './errors';
+import { OperationCancelled, type ErrorReporter } from './errors';
 import { untilCancelled } from './cancellation';
 import { runTask, type Lifetime, type Scope, type TaskContext } from './scope';
 import { State, type ReadonlyState, type Snapshot, reportObserverError, synchronousStateEffect } from './state';
@@ -58,7 +58,7 @@ export class StateBindings {
     constructor(
         protected readonly owner: Lifetime,
         protected readonly current: () => boolean = () => true,
-        protected readonly fault: ErrorReporter = reportError,
+        protected readonly fault: ErrorReporter = owner.report,
     ) {
         this.preparation = new Preparation(owner);
     }
@@ -167,7 +167,7 @@ export class StateBindings {
             if (error instanceof OperationCancelled || !active()) return;
             const initial = !painted;
             // 初始必需错误由 ready 交给宿主，避免在 onShow 准备栈内重入关闭。
-            const report = preparing ? (options.onError ?? reportError) : this.fault;
+            const report = preparing ? (options.onError ?? this.owner.report) : this.fault;
             if (!initial || !this.preparing || options.required === false || (preparing && options.onError))
                 reportObserverError(report, error);
         };

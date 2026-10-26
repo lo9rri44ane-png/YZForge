@@ -1,4 +1,11 @@
-import { ErrorReporter, FrameworkError, invariant, OperationCancelled, reportError } from '../core/errors';
+import {
+    ErrorReporter,
+    FrameworkError,
+    invariant,
+    OperationCancelled,
+    reportError,
+    errorReporter,
+} from '../core/errors';
 import { Lifetime, runTask, Scope, TaskContext } from '../core/scope';
 
 /** 启动尝试上下文；首次界面、会话和临时工作应使用这个 scope，以便失败时统一回收。 */
@@ -8,13 +15,18 @@ export interface BootContext extends TaskContext {
 }
 
 /** @internal 同步通知启动故障；通知失败不能中断清理或替换原始错误，正常取消不通知。 */
-export function notifyBootCleaning(error: unknown, observer?: ErrorReporter): void {
+export function notifyBootCleaning(
+    error: unknown,
+    observer?: ErrorReporter,
+    report: ErrorReporter = reportError,
+): void {
     if (error instanceof OperationCancelled) return;
+    const notifyFailure = errorReporter(report, { source: 'boot-cleaning' });
     try {
         // 不等待通知；即使调用方误用异步回调，也接住其拒绝，避免遗留未处理异常。
-        void Promise.resolve(observer?.(error)).catch(reportError);
+        void Promise.resolve(observer?.(error)).catch(notifyFailure);
     } catch (notificationError) {
-        reportError(notificationError);
+        notifyFailure(notificationError);
     }
 }
 
@@ -64,7 +76,7 @@ export class BootFlow {
             .catch(async (error) => {
                 this.phase = 'cleaning';
                 scope.cancel();
-                notifyBootCleaning(error, onCleaning);
+                notifyBootCleaning(error, onCleaning, scope.report);
                 try {
                     await scope.close();
                 } catch (cleanup) {

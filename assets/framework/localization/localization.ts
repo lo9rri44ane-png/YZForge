@@ -3,7 +3,7 @@ import type { AssetAddress, AssetKey, AssetKind, BundleRef } from '../assets/ass
 import { bundleId } from '../assets/asset-types';
 import { LeaseCache } from '../assets/lease-cache';
 import { untilCancelled } from '../core/cancellation';
-import { FrameworkError, invariant, OperationCancelled, reportError } from '../core/errors';
+import { FrameworkError, invariant, OperationCancelled } from '../core/errors';
 import { Scope, type Lifetime } from '../core/scope';
 
 export type TextParameters = Readonly<Record<string, string | number>>;
@@ -427,6 +427,7 @@ export class Localization {
             },
             () => {},
             (value) => this.cleanup([value.scope]),
+            this.scope.report,
         );
         if (release) {
             invariant(
@@ -543,7 +544,7 @@ export class Localization {
                         try {
                             rollback();
                         } catch (cleanup) {
-                            reportError(cleanup);
+                            this.scope.report(cleanup);
                         }
                     }
                     throw error;
@@ -619,7 +620,7 @@ export class Localization {
     private async cleanup(scopes: readonly Scope[]): Promise<void> {
         for (const result of await Promise.allSettled(scopes.map((scope) => scope.close())))
             if (result.status === 'rejected')
-                reportError(
+                this.scope.report(
                     new FrameworkError('I18N_PREVIOUS_CLEANUP_FAILED', '多语言资源回收异常', { error: result.reason }),
                 );
     }

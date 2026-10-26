@@ -1,7 +1,7 @@
 import { _decorator, Component, type Asset, isValid, UIRenderer, Node } from 'cc';
 import { EDITOR } from 'cc/env';
 import { runTask } from '../../core/scope';
-import { FrameworkError, reportError } from '../../core/errors';
+import { FrameworkError } from '../../core/errors';
 import { ComponentScope, type ComponentContext } from '../../components/component-scope';
 const { ccclass, property } = _decorator;
 
@@ -47,7 +47,7 @@ export class LocalizedComponent extends Component {
     protected readonly lifetime = new ComponentScope(this, (context) => {
         if (!this.key) return;
         if (!context.i18n) {
-            reportError(
+            this.lifetime.report(
                 new FrameworkError(
                     'I18N_HOST_MISSING',
                     `${this.node.name}: 请先在框架实例下调用 assets.bindComponents(node)，或由 App.bindScene 接入场景`,

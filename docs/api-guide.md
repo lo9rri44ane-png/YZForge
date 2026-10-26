@@ -341,7 +341,15 @@ if (navigation.status === 'ignored') return;
 
 ## 诊断与制作流程恢复
 
-模块中的诊断页面可用 `ctx.diagnostics.snapshot()` 获取页面、模块、资源包和持有计数摘要，用 `.module(id)` 区分代码可用与业务就绪。它没有 UI 操作或模块启动能力，不承担业务状态查询。外部工具使用 `app.inspect()` 返回只读快照，包含模块使用数/清理状态、UI、Scope 树、任务标签、资源/配置持有者和时间质量。查询不会启动模块或加载资源，不返回可直接修改的内部 Node/Map。卡住时先看哪些 Scope 仍有任务、哪个持有者还没结束；快照不是完整的引擎 GPU/原生内存统计。
+模块中的诊断页面可用 `ctx.diagnostics.snapshot()` 获取页面、模块、资源包和持有计数摘要，用 `.module(id)` 区分代码可用与业务就绪。它没有 UI 操作或模块启动能力，不承担业务状态查询。外部工具使用 `app.inspect()` 返回只读快照，包含模块使用数/清理状态、UI、Scope 树、资源/配置持有者和时间质量。查询不会启动模块或加载资源，不返回可直接修改的内部 Node/Map；快照不是完整的引擎 GPU/原生内存统计。
+
+在 `AppEntry.appOptions()` 返回的装配参数中设置 `onError(error, context)` 和 `logSink(record)`，即可接入项目的诊断服务。`context` 可含 `scopeId`、`scope` 和 `source`；`record` 含 `level`、`prefix`、`message` 和 `values`。业务日志仍按当前游戏设置过滤，框架故障不会被业务日志级别静默屏蔽。`ctx.scope.report(error)` 可上报已处理但仍需记录的故障。调用方应继续处理返回的 Promise；错误出口不负责自动捕获所有业务异常，也不替代区域的 `onError` 反馈。
+
+Scope 和日志出口隔离上报器的同步异常与异步拒绝，失败回退到 console；正常 `OperationCancelled` 不报警。独立使用的组件/Scope 未接入 App 时使用默认出口，显式传入的局部错误回调则遵循该 API 的约定。
+
+`Scope.inspect()` 为 Scope 和任务提供本次运行内稳定的数字 `id`。`tasks` 是记录数组，每项含 `id`、`label`、`startedAtMs`、`elapsedMs`，取消后还含 `cancellingForMs`。Scope 自身提供 `startedAtMs`、`cancelledAtMs`；关闭中 `closingPhase` 为 `tasks`、`children` 或 `cleanup`，清理回调执行中可查看 `cleanupStartedAtMs`。这些默认使用设备时间，仅用于诊断，不作为业务计时或结算依据。
+
+排查关闭卡住时，先看 `closingPhase`，再沿子 Scope 找到持续保留的任务 ID 和取消等待时长。任务记录在实际 Promise 结束后才移除；取消或 UI 隔离超时不会伪造任务完成，也不会提前释放其资源。测试可向独立 Scope 构造函数第三个参数注入诊断时钟。
 
 工作台创建中断会在 `.yzforge/incomplete-creations` 保留步骤和前后快照。在“删除与恢复 → 未完成的创建”点击“检查残留”，确认范围后“清理本次创建”。整次清理遇到后续修改、未知文件、外部引用或未确认的原生元数据会停止；不会强行猜测资源身份。编辑器重启后，只要没有仍在运行的项目操作，就能重新检查。清理中断的记录可再次检查后继续。
 

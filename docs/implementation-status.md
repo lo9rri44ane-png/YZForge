@@ -31,6 +31,17 @@ npm run test:showcase
 
 `verify` 依次检查 ESLint、格式、运行时/合同类型、框架规则、生成一致性和框架/工具测试。`test:showcase` 单独检查示例业务，移除示例后不再执行。测试脚本定义见 [package.json](../package.json)，环境设置见 [开发环境与代码规范](development.md)。
 
+自动验证分为两层：
+
+| 入口                                          | 环境与覆盖                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `npm run verify:node`                         | 无需 Creator；全仓库格式、工具/测试/扩展 ESLint、框架/工具单元测试和现存示例测试                         |
+| `npm run verify:creator -- --url 当前项目URL` | 先完成项目导入并连接 MCP；全仓库 ESLint、格式、两套类型检查、架构/生成一致性、上述测试和默认运行时集成组 |
+
+[CI 工作流](../.github/workflows/verify.yml) 在 Windows、macOS、Linux 的 Node 22/24 上执行 Node 层，记录 Node 性能样本并上传报告；托管机器之间不自动比较耗时。Node 层不检查依赖 Creator 声明的运行时类型及架构/生成一致性，Creator 层需在已准备编辑器的环境中另行运行。`verify:creator` 可用 `--groups diagnostics,presentation,ui` 缩小集成范围；工作台资产操作、特定构建配置与真机验收仍单独执行。
+
+两层入口和集成组入口均把每步输出及 `report.json` 写入 `.yzforge/verification/`。子进程直接写入日志文件，保留 UTF-8 原始字节；报告记录命令参数、退出码、耗时、Node/操作系统/项目所需 Creator 版本、提交与工作区是否有未提交内容，Git 信息不可用时省略。首个失败停止，保留已执行步骤和失败日志。`verify:creator --groups` 必须选择至少一个功能组，Node 层不接受此参数。缓存目录不提交，应将 CI artifact 或本次报告随验收记录保存。机器进程被强制终止时不能保证报告完整。
+
 ## Creator 与运行时检查
 
 集成脚本使用项目根目录的本机 MCP 配置，并校验连接的 Creator 项目路径。先确认当前编辑器就是待测项目；复制项目后重新生成连接配置。只运行本次改动涉及的脚本。
@@ -42,10 +53,12 @@ npm run test:integration -- --list
 npm run test:integration -- ui startup --url http://localhost:7456/
 ```
 
-`--list` 列出各组需要保留的示例；`ui` 包含排序、生命周期和清理回归，`startup` 检查启动反馈及重试屏障。其余可选组为 `components`、`resources`、`localization`、`audio`、`network`、`list` 和 `showcase`。此入口不自动运行会修改项目资产的工作台检查，也不替代需要特定构建配置的检查。未传功能组时只显示用法。
+`--list` 列出各组需要保留的示例；`ui` 包含排序、生命周期和清理回归，`startup` 检查启动反馈及重试屏障，`presentation` 检查状态、准备与页面组合。其余可选组为 `diagnostics`、`performance`、`components`、`resources`、`localization`、`audio`、`network`、`list` 和 `showcase`。此入口不自动运行会修改项目资产的工作台检查，也不替代需要特定构建配置的检查。未传功能组时只显示用法。
 
 | 入口（位于 `tests/integration/`）                                                           | 前置条件与覆盖范围                                                                                                                               |
 | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [verify-observability.mjs](../tests/integration/verify-observability.mjs)                   | 当前项目预览或 Web URL；验证 App 错误/日志出口、模块/事件上下文和取消后任务保留                                                                  |
+| [verify-performance.mjs](../tests/integration/verify-performance.mjs)                       | 保留展示模块；记录真实页面打开、滚动耗时、实例上限及关闭后持有数量                                                                               |
 | [verify-workbench.mjs](../tests/integration/verify-workbench.mjs)                           | Creator 与 MCP 已连接；创建临时模块，检查脚本、Part、绑定、XLSX、删除及恢复。成功后回收，失败保留现场；`--keep-for-build` 可保留夹具供构建检查。 |
 | [verify-creation.mjs](../tests/integration/verify-creation.mjs)                             | Creator 与 MCP 已连接；创建中断、残留清理、后续修改冲突、生成错误与创建成果分离。                                                                |
 | [verify-panel.mjs](../tests/integration/verify-panel.mjs)                                   | 保留示例数据；检查真实工作台预览、页面公开范围、草稿、设置及生成恢复。                                                                           |
@@ -77,6 +90,22 @@ node tests/integration/verify-runtime.mjs "http://127.0.0.1:实际端口/"
 node tests/integration/verify-audio.mjs "http://127.0.0.1:实际端口/"
 ```
 
+## 性能基线
+
+```powershell
+npm run benchmark:node
+npm run benchmark:runtime -- http://localhost:7456/
+# 使用上述命令输出的历史报告路径，比较同一环境下的后续运行。
+npm run benchmark:node -- --baseline .yzforge/performance/此前的Node报告.json
+npm run benchmark:runtime -- http://localhost:7456/ --baseline .yzforge/performance/此前的运行时报告.json
+```
+
+URL 换成当前项目的实际地址。Node 基线检查 250 个派生分支在 2000 次无关源更新中不额外计算，以及十万条固定高度列表在跳转中保持有限实例数。Creator 基线预热后多次打开/关闭真实列表页，采集打开耗时和滚动帧间隔，检查实例上限及资源/配置/界面持有回到预热后的基准。首轮冷打开单独记录；有缓存的持有基准不要求为零。
+
+报告保存到 `.yzforge/performance/`，包含 median、p95、max、样本数、环境和场景参数。第一次运行仅记录时间基线，结构性预算仍会校验；实例数、持有回落或耗时检查失败也会保存已采集的数据和原因。传入 `--baseline` 才比较耗时，失败报告不能作为基线。[performance-budgets.json](../project-settings/performance-budgets.json) 默认允许 p95 不超过旧值的 1.3 倍加 2 ms，并设置运行时采样和实例上限。Node/浏览器/引擎、预览或构建模式、CPU、视口和场景配置不同会拒绝比较；先在对应环境重建基线，不跨设备混用。
+
+耗时受系统负载、温度和渲染环境影响，应在稳定设备上采样。Electron 测试窗口的数据只验证该运行环境；持有数量回落不等于引擎 GPU 或原生堆无泄漏。目标设备的内存、帧率、下载和启动时间仍需发布构建与真机验收。
+
 ## 构建与结果判定
 
 保存 `Bootstrap/GameRoot/GameSettings` 后导出构建参数，构建流程见 [游戏设置与 SDK](game-settings-sdk.md#构建与预览模拟)。构建钩子检查配置一致性、UI 类注册、模块边界和产物归属，报告写入 `.yzforge/build-reports`。已有构建还可单独审计：
@@ -85,6 +114,6 @@ node tests/integration/verify-audio.mjs "http://127.0.0.1:实际端口/"
 node tools/yzforge/cli.mjs audit-build --output build/web-mobile --platform web-mobile
 ```
 
-[build-budgets.json](../project-settings/build-budgets.json) 按 `default` 与 `platforms` 合并预算；`maxTotalBytes`、`maxLocalRootBytes`、`maxDuplicateBytes` 单位均为字节，`null` 不限制。默认模板未设体积上限，审计通过不表示满足平台发行限制。完整同内容重复检查只统计至少 1 KiB 的文件。
+[build-budgets.json](../project-settings/build-budgets.json) 按 `default` 与 `platforms` 合并预算；`maxTotalBytes`、`maxLocalRootBytes`、`maxDuplicateBytes` 单位均为字节，`null` 不限制。模板默认分别限制为 16 MiB、12 MiB 和 128 KiB；超限使审计失败。这是模板的开发预算，项目应按实际内容和目标平台重设，审计通过不表示满足平台压缩包/发行限制。完整同内容重复检查只统计至少 1 KiB 的文件。
 
 记录结果时注明版本、命令、目标平台及实际运行环境。Creator 当前脚本诊断、实际预览、构建成功和真机运行是不同层次；历史日志和故障注入记录不能冒充本次结果。检查新增错误，并保留失败原因及尚未执行的目标。

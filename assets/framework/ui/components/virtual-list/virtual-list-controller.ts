@@ -1,4 +1,4 @@
-import { type ErrorReporter, FrameworkError, invariant, OperationCancelled, reportError } from '../../../core/errors';
+import { type ErrorReporter, FrameworkError, invariant, OperationCancelled } from '../../../core/errors';
 import { type Lifetime, runTask, Scope } from '../../../core/scope';
 import { Preparation } from '../../../core/preparation';
 import { ItemBinding, itemKeys, type ItemContext, type ItemKey } from '../../item-binding';
@@ -70,7 +70,7 @@ export class VirtualListController<T, Item> {
         layout: VirtualListLayout,
         private readonly adapter: VirtualListAdapter<T, Item>,
         private readonly key: (data: T) => ItemKey,
-        private readonly report: ErrorReporter = reportError,
+        private readonly report: ErrorReporter = owner.report,
     ) {
         this.layout = new FixedVirtualLayout(layout);
         this.scope = owner.child('virtual-list');

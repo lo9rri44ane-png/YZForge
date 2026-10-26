@@ -76,7 +76,7 @@ export class GameRoot extends AppEntry {
      * @param error - 原始启动错误。
      */
     protected onBootFailed(error: unknown): void {
-        console.error('[YZForge] Bootstrap failed', error);
+        super.onBootFailed(error);
         if (this.bootStatus) {
             this.bootStatus.node.active = true;
             this.bootStatus.string = `启动失败\n${error instanceof Error ? error.message : String(error)}`;

@@ -1,4 +1,4 @@
-import { FrameworkError, invariant, reportError } from '../core/errors';
+import { FrameworkError, invariant } from '../core/errors';
 import { runTask, Scope, scopeOwner, type Lifetime } from '../core/scope';
 
 /** 池容量包含空闲、借出、正在创建和正在归还的实例。 */
@@ -212,7 +212,7 @@ export class InstancePool<T, Input> {
                     borrow = { release, cancel };
                     this.borrows.add(borrow);
                     detach = use.signal.onAbort(() => {
-                        if (!releasing && !automatic) void cancel().catch(reportError);
+                        if (!releasing && !automatic) void cancel().catch(this.scope.report);
                     });
                     unown = owner.defer(cancel);
                     const returned: unknown = this.driver.activate(current.value, input, use.lifetime);
@@ -284,7 +284,7 @@ export class InstancePool<T, Input> {
         owner.signal.throwIfAborted();
         invariant(this.entries.size + this.creating < this.maxSize, 'POOL_FULL', '实例池已达总量上限');
         this.creating++;
-        const resources = new Scope('pooled-instance');
+        const resources = new Scope('pooled-instance', this.scope.report);
         const offOwner = owner.signal.onAbort(() => resources.cancel());
         const offPool = this.scope.signal.onAbort(() => resources.cancel());
         try {

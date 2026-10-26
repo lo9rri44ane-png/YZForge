@@ -1,0 +1,19 @@
+# Keep generated hashes and formatting checks consistent across Git clients.
+*.ts text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+.editorconfig text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.prettierignore text eol=lf
+
+# Preserve Creator serialization bytes; edit these assets through AssetDB.
+*.meta -text
+*.prefab -text
+*.scene -text

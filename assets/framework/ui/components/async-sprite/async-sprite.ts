@@ -2,7 +2,7 @@ import { _decorator, isValid, Sprite, SpriteFrame } from 'cc';
 import { EDITOR } from 'cc/env';
 import type { AssetAccess } from '../../../assets/asset-access';
 import type { AssetKey } from '../../../assets/asset-types';
-import { invariant, reportError } from '../../../core/errors';
+import { invariant } from '../../../core/errors';
 import { type Lifetime, type Scope, runTask } from '../../../core/scope';
 import { OperationCancelled } from '../../../core/errors';
 import { ComponentScope, type ComponentContext } from '../../../components/component-scope';
@@ -40,7 +40,7 @@ export class AsyncSprite extends Sprite {
             void this.bind(activation.scope, activation.assets)
                 .set(this.source)
                 .catch((error) => {
-                    if (!(error instanceof OperationCancelled)) reportError(error);
+                    if (!(error instanceof OperationCancelled)) activation.scope.report(error);
                 });
     }
     /**
@@ -59,8 +59,9 @@ export class AsyncSprite extends Sprite {
     }
     /** 可直接接入 Button.clickEvents，自定义事件数据填写图片逻辑名称。 */
     loadFromEvent(_event: unknown, source: string): void {
+        const report = this.lifetime.report;
         void this.setSource(source).catch((error) => {
-            if (!(error instanceof OperationCancelled)) reportError(error);
+            if (!(error instanceof OperationCancelled)) report(error);
         });
     }
     /**
@@ -81,7 +82,7 @@ export class AsyncSprite extends Sprite {
         const set = async (key: AssetKey<'SpriteFrame'> | string | null) => {
             scope.signal.throwIfAborted();
             const currentVersion = ++version;
-            if (request) void request.close().catch(reportError);
+            if (request) void request.close().catch(request.report);
             request = undefined;
             this.spriteFrame = key === null ? null : this.placeholder;
             state = key === null ? 'empty' : 'loading';

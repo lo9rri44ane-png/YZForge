@@ -1,8 +1,8 @@
 {
   "default": {
-    "maxTotalBytes": null,
-    "maxLocalRootBytes": null,
-    "maxDuplicateBytes": null
+    "maxTotalBytes": 16777216,
+    "maxLocalRootBytes": 12582912,
+    "maxDuplicateBytes": 131072
   },
   "platforms": {}
 }

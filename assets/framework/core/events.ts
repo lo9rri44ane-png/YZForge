@@ -1,4 +1,4 @@
-import { ErrorReporter, OperationCancelled, reportError } from './errors';
+import { ErrorReporter, OperationCancelled, reportError, errorReporter } from './errors';
 import { runTask, Lifetime, TaskContext } from './scope';
 /**
  * 事件的轻量公开合同，用同一个稳定 ID 关联发布者与订阅者，并携带载荷的 TypeScript 类型。
@@ -37,7 +37,10 @@ export class Events {
      * 创建事件总线，App 默认提供共享实例。
      * @param report - 订阅回调异常的上报器；默认 reportError，正常取消不会作为错误上报。
      */
-    constructor(private readonly report: ErrorReporter = reportError) {}
+    private readonly report: ErrorReporter;
+    constructor(report: ErrorReporter = reportError) {
+        this.report = errorReporter(report);
+    }
     /**
      * 订阅事件并自动跟随 scope 取消；每次回调作为该 Lifetime 的任务被跟踪。
      * @param key - 共享的事件合同。
@@ -82,9 +85,13 @@ export class Events {
     emit<T>(key: EventKey<T>, payload: T): void {
         for (const item of Array.from(this.listeners.get(key.id) ?? [])) {
             if (!item.scope.signal.aborted)
-                void runTask(item.scope, (task) => item.invoke(payload, task)).catch((error) => {
-                    if (!(error instanceof OperationCancelled)) this.report(error);
-                });
+                void runTask(item.scope, (task) => item.invoke(payload, task), undefined, `event:${key.id}`).catch(
+                    (error) => {
+                        const owner = item.scope.inspect();
+                        if (!(error instanceof OperationCancelled))
+                            this.report(error, { scopeId: owner.id, scope: owner.label, source: `event:${key.id}` });
+                    },
+                );
         }
     }
 }

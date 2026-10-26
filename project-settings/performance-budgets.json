@@ -1,0 +1,10 @@
+{
+  "maxRegressionFactor": 1.3,
+  "slackMs": 2,
+  "runtime": {
+    "warmupCycles": 2,
+    "pageCycles": 8,
+    "scrollSamples": 90,
+    "maxListInstances": 100
+  }
+}

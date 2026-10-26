@@ -1,4 +1,4 @@
-import { FrameworkError, OperationCancelled, reportError, type ErrorReporter } from '../core/errors';
+import { FrameworkError, OperationCancelled, type ErrorReporter } from '../core/errors';
 import { untilCancelled } from '../core/cancellation';
 import { runTask, type Lifetime, type Scope, type TaskContext } from '../core/scope';
 import { batch, reportObserverError } from '../core/state';
@@ -48,7 +48,7 @@ export class KeyedCollection<T, Item> {
         owner: Lifetime,
         private readonly key: (data: T) => ItemKey,
         private readonly adapter: CollectionAdapter<T, Item>,
-        private readonly report: ErrorReporter = reportError,
+        private readonly report: ErrorReporter = owner.report,
     ) {
         this.scope = owner.child('parts');
         this.preparation = new Preparation(this.scope.lifetime);

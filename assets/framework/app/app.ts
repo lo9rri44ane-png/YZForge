@@ -19,7 +19,7 @@ import { ClockDriver, SystemClockDriver } from '../core/clock-driver';
 import { Events } from '../core/events';
 import { Scope, Lifetime } from '../core/scope';
 import { ErrorReporter, FrameworkError } from '../core/errors';
-import { GameLog } from '../core/game-log';
+import { GameLog, type LogSink } from '../core/game-log';
 import {
     componentBindings,
     ComponentHost,
@@ -37,6 +37,10 @@ import { ScopedLocalization } from '../ui/localization/localized-ui';
  * 应用启动装配参数。通常由项目设置和生成的发布清单构建，交给 AppEntry.appOptions。
  */
 export interface AppOptions {
+    /** 框架默认错误出口，随 Scope 传递，隔离上报器故障并附带上下文。 */
+    readonly onError?: ErrorReporter;
+    /** 业务日志出口；日志级别仍由当前游戏设置控制。 */
+    readonly logSink?: LogSink;
     /** 当前构建的配置快照；存档仍仅使用 appId，不按此配置拆分。 */
     readonly settings?: GameConfig;
     /** 项目显式登记的渠道组合接入；JSON integration 通过稳定名称选择。 */
@@ -140,20 +144,20 @@ export class App {
     /**
      * 应用根生命周期，覆盖所有核心服务；普通业务流程优先放到 flows 或更短的子 Scope。
      */
-    readonly scope = new Scope('app');
+    readonly scope: Scope;
     /**
      * 应用中的普通业务流程所有者；关停时优先取消，避免流程继续请求正在关闭的服务。
      * 可以 child 创建独立会话，并在会话结束时 close。
      */
-    readonly flows = this.scope.child('flows');
+    readonly flows: Scope;
     /** 失败时回收本次业务启动，保留核心服务以展示错误和允许显式重试。 */
-    readonly boot = new BootFlow(this.flows.lifetime);
+    readonly boot: BootFlow;
     /**
      * 全应用共享的类型化事件总线，用于广播已发生的事实；命令和查询优先用模块 API。
      */
-    readonly events = new Events();
+    readonly events: Events;
     /** 应用红点状态域；业务来源和 UI 订阅仍须传入各自的 Scope。 */
-    readonly badges = new BadgeStore(this.scope);
+    readonly badges: BadgeStore;
     /** 通用 HTTP 客户端；每次请求必须显式传入生命周期。 */
     readonly http: HttpClient;
     /** 只读的版本、渠道、模式、环境和服务参数。 */
@@ -233,7 +237,7 @@ export class App {
             await app.sdk.initialize();
             return app;
         } catch (error) {
-            notifyBootCleaning(error, onCleaning);
+            notifyBootCleaning(error, onCleaning, partial?.scope.report ?? input.onError);
             try {
                 await partial?.close();
             } catch (cleanup) {
@@ -251,6 +255,11 @@ export class App {
      * @throws FrameworkError appId、发布路由、模块依赖或服务配置不合法。
      */
     private constructor(input: AppOptions, capture: (partial: App) => void) {
+        this.scope = new Scope('app', input.onError);
+        this.flows = this.scope.child('flows');
+        this.boot = new BootFlow(this.flows.lifetime);
+        this.events = new Events(this.scope.report);
+        this.badges = new BadgeStore(this.scope);
         capture(this);
         if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(input.appId))
             throw new FrameworkError('APP_ID_INVALID', 'Provide a stable application ID for storage isolation');
@@ -272,6 +281,7 @@ export class App {
         this.log = new GameLog({
             level: this.settings.diagnostics.logLevel,
             prefix: `[${this.settings.channel}/${this.settings.environment} v${this.settings.appVersion}]`,
+            sink: input.logSink,
         });
         this.sdk = new GameSdk(
             this.settings,
@@ -286,14 +296,14 @@ export class App {
             transport: input.http?.transport ?? createPlatformHttpTransport(),
         });
         this.clock = input.clock ?? createPlatformClock(input.clockOptions);
-        this.time = new TimeService(this.clock, this.scope, input.time);
+        this.time = new TimeService(this.clock, this.scope, input.time, this.scope.report);
         this.assets = new Assets(input.release, this.scope);
         this.i18n = new Localization(
             this.scope,
             async (address, owner) => (await this.assets.loadAddress(address, owner)).json,
             input.release.localization,
         );
-        this.config = new ConfigManager(this.assets);
+        this.config = new ConfigManager(this.assets, this.scope.report);
         this.assets.attachConfig(this.config);
         this.modules = new ModuleManager(
             input.modules,
@@ -334,7 +344,7 @@ export class App {
                         });
                     },
                 }),
-            undefined,
+            this.scope.report,
             input.cleanupTimeoutMs,
         );
         this.modules.loadFactory = bundleFactoryLoader(this.assets);
@@ -365,7 +375,7 @@ export class App {
             this.clock,
             input.views,
             this.scope.lifetime,
-            undefined,
+            this.scope.report,
             input.cleanupTimeoutMs,
         );
         this.audio = new AudioManager(

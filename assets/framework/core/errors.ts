@@ -49,8 +49,39 @@ export function invariant(condition: unknown, code: string, message: string): as
 /**
  * 同步错误上报回调；可接入项目日志系统，应避免自身再次抛错。
  */
-export type ErrorReporter = (error: unknown) => void;
+export interface ErrorContext {
+    readonly scopeId?: number;
+    readonly scope?: string;
+    readonly source?: string;
+}
+export type ErrorReporter = (error: unknown, context?: Readonly<ErrorContext>) => void;
 /**
  * 默认错误上报器，通过 console.error 输出带 [YZForge] 前缀的错误。
  */
-export const reportError: ErrorReporter = (error) => console.error('[YZForge]', error);
+export const reportError: ErrorReporter = (error, context) => console.error('[YZForge]', error, context ?? '');
+
+/** 隔离上报器自身的失败；正常取消不报警，不修改原始错误。异步上报的拒绝同样被接住。 */
+export function errorReporter(report: ErrorReporter = reportError, context: ErrorContext = {}): ErrorReporter {
+    const base = Object.freeze({ ...context });
+    return (error, extra) => {
+        if (error instanceof OperationCancelled) return;
+        const details = Object.freeze({ ...base, ...extra });
+        const failed = (cause: unknown) => {
+            try {
+                reportError(
+                    new FrameworkError('ERROR_REPORTER_FAILED', 'Error reporter failed', { error, cause }),
+                    details,
+                );
+            } catch {
+                /* Reporting must never interrupt application cleanup. */
+            }
+        };
+        try {
+            const result: unknown = report(error, details);
+            if (result && typeof (result as PromiseLike<unknown>).then === 'function')
+                void Promise.resolve(result).catch(failed);
+        } catch (cause) {
+            failed(cause);
+        }
+    };
+}

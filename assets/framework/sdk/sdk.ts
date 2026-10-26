@@ -1,5 +1,5 @@
 import { CancellationSource, type CancellationSignal } from '../core/cancellation';
-import { FrameworkError, OperationCancelled, reportError } from '../core/errors';
+import { FrameworkError, OperationCancelled } from '../core/errors';
 import { runTask, type Lifetime } from '../core/scope';
 import type { GameConfig, GamePlatform, JsonValue, ShareTemplate } from '../app/game-config';
 
@@ -306,7 +306,7 @@ export class GameSdk {
             try {
                 (subscription.callback as (info?: LaunchInfo) => void)(launch);
             } catch (error) {
-                reportError(error);
+                subscription.owner.report(error);
             }
         }
     }

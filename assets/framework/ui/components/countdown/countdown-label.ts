@@ -1,6 +1,6 @@
 import { _decorator, Component, game, Game, Label } from 'cc';
 import { EDITOR } from 'cc/env';
-import { type ErrorReporter, invariant, OperationCancelled, reportError } from '../../../core/errors';
+import { type ErrorReporter, invariant, OperationCancelled } from '../../../core/errors';
 import { type Lifetime, type TaskContext, runTask } from '../../../core/scope';
 import type { TimeAccess } from '../../../time/time-access';
 import { ComponentScope } from '../../../components/component-scope';
@@ -90,7 +90,7 @@ export class CountdownLabel extends Label {
     }
     /** 停止并保留当前文字，可直接连接 Button.clickEvents。 */
     stop(): void {
-        void this.clear().catch(reportError);
+        void this.clear().catch(this.lifetime.report);
     }
     /**
      * 绑定绝对截止时刻；已到期立即显示 0 并调度一次完成回调，不负责发奖或持久化。
@@ -107,7 +107,7 @@ export class CountdownLabel extends Label {
             '已有语言模板绑定，不能同时传自定义 format',
         );
         countdownSeconds(options.deadlineMs, time.nowMs());
-        const report = options.onError ?? reportError;
+        const report = options.onError ?? owner.report;
         let off = () => {},
             ended = false,
             last = -1;

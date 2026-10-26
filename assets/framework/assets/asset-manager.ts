@@ -23,7 +23,7 @@ import type { ConfigManager } from '../config/config-manager';
 import type { ConfigAccess } from '../config/config-access';
 import { untilCancelled } from '../core/cancellation';
 import { bindAdditionalComponents } from '../components/component-binding';
-import { FrameworkError, invariant, OperationCancelled, reportError } from '../core/errors';
+import { FrameworkError, invariant, OperationCancelled } from '../core/errors';
 import { Scope, Lifetime, scopeOwner, runTask } from '../core/scope';
 import {
     AssetAddress,
@@ -140,6 +140,7 @@ export class Assets {
                 value.asset.decRef();
                 value.atlas?.decRef();
             },
+            owner.report,
         );
     }
     /**
@@ -407,7 +408,7 @@ export class Assets {
             this.instances.set(node, { scope: instance, moduleId });
             // 业务直接销毁节点时也结束持有；正常 Scope 清理触发同一事件时 close 保持幂等。
             node.once(Node.EventType.NODE_DESTROYED, () => {
-                void instance.close().catch(reportError);
+                void instance.close().catch(this.scope.report);
             });
             this.bindInstance(node, instance, moduleId, input.active ?? true);
             parent.addChild(node);
@@ -492,7 +493,7 @@ export class Assets {
         let state = this.sprites.get(target);
         if (!state) this.sprites.set(target, (state = { sequence: 0 }));
         const sequence = ++state.sequence;
-        if (state.pending) void state.pending.close().catch(reportError);
+        if (state.pending) void state.pending.close().catch(this.scope.report);
         const pending = owner.child(`sprite:${typeof key === 'string' ? key : key.id}`);
         state.pending = pending;
         try {

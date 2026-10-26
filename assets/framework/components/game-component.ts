@@ -53,6 +53,7 @@ export class GameComponent extends Component {
      * onInit 前注入的业务宿主上下文；跨模块 Part 通常使用调用方宿主。
      */
     protected ctx!: ModuleContext;
+    private readonly report = (error: unknown) => (this.instance?.report ?? reportError)(error);
     private instance?: Scope;
     private owner?: Scope;
     private activation?: ActivationContext;
@@ -126,7 +127,7 @@ export class GameComponent extends Component {
         this.__preparation = new Preparation(instance.lifetime);
         instance.signal.onAbort(() => {
             this.allowed = false;
-            void this.__deactivate().catch(reportError);
+            void this.__deactivate().catch(this.report);
         });
         instance.defer(async () => {
             await this.__deactivate();
@@ -142,7 +143,7 @@ export class GameComponent extends Component {
         this.owner = owner;
         this.allowed = !!owner;
         if (!owner) {
-            void this.__deactivate().catch(reportError);
+            void this.__deactivate().catch(this.report);
             return;
         }
         if (this.enabledInHierarchy && this.initialized) {
@@ -196,8 +197,8 @@ export class GameComponent extends Component {
             synchronous(this.onTick(dt), 'onTick');
         } catch (error) {
             this.allowed = false;
-            void this.__deactivate().catch(reportError);
-            reportError(error);
+            void this.__deactivate().catch(this.report);
+            this.report(error);
         }
     }
     /**
@@ -210,8 +211,8 @@ export class GameComponent extends Component {
             synchronous(this.onLateTick(dt), 'onLateTick');
         } catch (error) {
             this.allowed = false;
-            void this.__deactivate().catch(reportError);
-            reportError(error);
+            void this.__deactivate().catch(this.report);
+            this.report(error);
         }
     }
     /**
@@ -219,7 +220,7 @@ export class GameComponent extends Component {
      * 引擎生命周期适配入口，由框架调用；业务请重写对应的 onShow、onActivate、onTick 等框架钩子。
      */
     onDisable(): void {
-        void this.__deactivate().catch(reportError);
+        void this.__deactivate().catch(this.report);
     }
     /**
      * @internal
@@ -228,7 +229,7 @@ export class GameComponent extends Component {
     onDestroy(): void {
         void this.__deactivate()
             .then(() => this.__dispose())
-            .catch(reportError);
+            .catch(this.report);
     }
     private activate(): void {
         if (this.activation || !this.owner || this.owner.signal.aborted || this.disposed) return;
@@ -236,8 +237,8 @@ export class GameComponent extends Component {
         const current = () => this.activation === activation;
         const fault = (error: unknown) => {
             this.allowed = false;
-            void this.__deactivate().catch(reportError);
-            reportError(error);
+            void this.__deactivate().catch(this.report);
+            this.report(error);
         };
         const activation: ActivationContext = Object.freeze({
             ...taskContext(scope, current),
@@ -259,7 +260,7 @@ export class GameComponent extends Component {
             });
         } catch (error) {
             this.allowed = false;
-            void this.__deactivate().catch(reportError);
+            void this.__deactivate().catch(this.report);
             throw error;
         }
     }

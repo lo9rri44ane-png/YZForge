@@ -1,4 +1,11 @@
-import { FrameworkError, invariant, OperationCancelled, type ErrorReporter, reportError } from './errors';
+import {
+    FrameworkError,
+    invariant,
+    OperationCancelled,
+    type ErrorReporter,
+    reportError,
+    errorReporter,
+} from './errors';
 import type { Lifetime } from './scope';
 
 /** 递归只读的数据快照。状态只接受普通对象、数组和原始值，不持有节点、资源或服务。 */
@@ -51,6 +58,7 @@ export function snapshot<T>(value: T, visiting = new Set<object>()): Snapshot<T>
 type GraphNode = {
     dependents: Set<DerivedNode>;
     read(): unknown;
+    revision(): number;
 };
 type DerivedNode = GraphNode & { invalidate(): void; settle(): void };
 const graph = new WeakMap<object, GraphNode>();
@@ -91,11 +99,7 @@ export function batch<T>(work: () => T & (T extends PromiseLike<unknown> ? never
 
 /** @internal 隔离观察者与错误处理器，不能把已完成的业务提交伪装成失败。 */
 export function reportObserverError(report: ErrorReporter, error: unknown): void {
-    try {
-        report(error);
-    } catch (cause) {
-        reportError(cause);
-    }
+    errorReporter(report)(error);
 }
 
 /** @internal void 回调的 TypeScript 类型也能接收 async 函数，运行时拒绝这种误用。 */
@@ -136,10 +140,10 @@ export class State<T> {
                 if (state.failure) throw state.failure.error;
                 return state.value;
             },
-            subscribe: (owner: Lifetime, listener: (value: Snapshot<T>) => void, onError = reportError) =>
+            subscribe: (owner: Lifetime, listener: (value: Snapshot<T>) => void, onError = owner.report) =>
                 state.subscribe(owner, listener, onError),
         });
-        this.node = { dependents: new Set(), read: () => this.readonly.value };
+        this.node = { dependents: new Set(), read: () => this.readonly.value, revision: () => this.version };
         graph.set(this.readonly, this.node);
     }
 
@@ -165,6 +169,7 @@ export class State<T> {
     /** @internal 派生失败使后续读取抛错，隔离并停止观察者。 */
     fail(error: unknown): void {
         this.failure = { error };
+        this.version++;
         for (const dependent of this.node.dependents) dependent.invalidate();
         notifications.set(this, () => {
             for (const listener of Array.from(this.listeners)) listener.fail(error);
@@ -253,8 +258,7 @@ export function derive<const S extends readonly ReadonlyState<unknown>[], T>(
         invariant(node, 'STATE_SOURCE_INVALID', 'derive requires framework states');
         return node;
     });
-    const compute = (): T => {
-        const values = dependencies.map((node) => node.read());
+    const compute = (values: unknown[]): T => {
         calculating++;
         try {
             const invoke = calculate as (...values: unknown[]) => T;
@@ -265,7 +269,8 @@ export function derive<const S extends readonly ReadonlyState<unknown>[], T>(
             calculating--;
         }
     };
-    const initial = compute();
+    const initial = compute(dependencies.map((node) => node.read()));
+    let revisions = dependencies.map((node) => node.revision());
     let active = true,
         stale = false,
         settling = false;
@@ -291,7 +296,13 @@ export function derive<const S extends readonly ReadonlyState<unknown>[], T>(
             dirty.delete(node);
             stale = false;
             try {
-                const next = snapshot(compute());
+                // 先结算全部输入以保持菱形图一致；失效不等于值改变。
+                // 读取也负责传播上游故障，即使上游最后一份数据没有变化。
+                const values = dependencies.map((source) => source.read());
+                const latest = dependencies.map((source) => source.revision());
+                if (latest.every((version, index) => version === revisions[index])) return;
+                revisions = latest;
+                const next = snapshot(compute(values));
                 const previous = state.readonly.value;
                 let equal: boolean;
                 calculating++;
@@ -304,7 +315,7 @@ export function derive<const S extends readonly ReadonlyState<unknown>[], T>(
             } catch (error) {
                 disconnect();
                 state.fail(error);
-                reportObserverError(options.onError ?? reportError, error);
+                reportObserverError(options.onError ?? owner.report, error);
             } finally {
                 settling = false;
             }

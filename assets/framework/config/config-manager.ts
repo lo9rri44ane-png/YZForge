@@ -3,7 +3,7 @@ import type { ConfigLoadOptions, LoadedTable } from './config-access';
 import type { Assets } from '../assets/asset-manager';
 import { BundleRef, bundleId } from '../assets/asset-types';
 import { LeaseCache } from '../assets/lease-cache';
-import { invariant } from '../core/errors';
+import { invariant, type ErrorReporter, reportError } from '../core/errors';
 import { Scope, Lifetime } from '../core/scope';
 import { ConfigTable, parseTable, TableData } from './config-table';
 import { TableDefinition, TableKey } from './schema';
@@ -26,11 +26,14 @@ export class ConfigManager {
      * @internal
      * 由 App 创建配置服务，使用同一个 Assets 管理 Bundle 和 JSON 资源引用。
      */
-    constructor(private readonly assets: Assets) {
+    constructor(
+        private readonly assets: Assets,
+        report: ErrorReporter = reportError,
+    ) {
         this.cache = new LeaseCache(
             async (id) => {
                 const request = this.requests.get(id)!;
-                const scope = new Scope(`table:${id}`);
+                const scope = new Scope(`table:${id}`, report);
                 try {
                     const json = await assets.loadPath(request.bundle, request.path, 'JsonAsset', scope);
                     return { data: parseTable(json.json, request.definition, request.revision), scope };
@@ -41,6 +44,7 @@ export class ConfigManager {
             },
             () => {},
             (value) => value.scope.close(),
+            report,
         );
     }
     /**

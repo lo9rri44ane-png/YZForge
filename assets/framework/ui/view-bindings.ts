@@ -1,7 +1,7 @@
 import { Button, isValid, Label, Node } from 'cc';
 import { StateBindings, type StateBinding } from '../core/state-bindings';
 import { claimProperties } from '../core/property-lease';
-import { invariant, OperationCancelled, reportError } from '../core/errors';
+import { invariant, OperationCancelled } from '../core/errors';
 import { derive, reportObserverError, type ReadonlyState, type Snapshot } from '../core/state';
 import type { Command, CommandCall } from '../core/command';
 import { runTask, type Lifetime } from '../core/scope';
@@ -36,7 +36,7 @@ export class ViewBindings extends StateBindings {
     constructor(
         owner: Lifetime,
         current: () => boolean = () => true,
-        fault: ErrorReporter = reportError,
+        fault: ErrorReporter = owner.report,
         private readonly interactive: () => boolean = () => true,
         private readonly assets?: AssetAccess,
     ) {
@@ -52,7 +52,7 @@ export class ViewBindings extends StateBindings {
         node: Node,
         event: string,
         callback: (...args: unknown[]) => void | Promise<void>,
-        onError: ErrorReporter = reportError,
+        onError: ErrorReporter = this.owner.report,
     ): () => void {
         this.owner.signal.throwIfAborted();
         const handler = (...args: unknown[]) => {
@@ -113,13 +113,13 @@ export class ViewBindings extends StateBindings {
                         () => this.interactive() && interactive(),
                         this.assets,
                     ),
-                this.fault,
+                (error) => this.fault(error),
             );
             const bindings = new StateBindings(owner.lifetime, this.current, this.fault);
             bindings.preparation.include(collection.preparation);
             const renderer = bindings.prepare(source, select, {
                 label: 'items',
-                onError: options.onError ?? (options.required === false ? reportError : undefined),
+                onError: options.onError ?? (options.required === false ? this.owner.report : undefined),
                 prepare: (items, task) => collection.prepare(items, task),
                 render: (plan) => collection.commit(plan),
             });
@@ -271,7 +271,8 @@ export class ViewBindings extends StateBindings {
             }
         };
         const failed = (error: unknown) => {
-            if (!(error instanceof OperationCancelled)) reportObserverError(options.onError ?? reportError, error);
+            if (!(error instanceof OperationCancelled))
+                reportObserverError(options.onError ?? this.owner.report, error);
         };
         if (!scope.signal.aborted) target.node.on(Button.EventType.CLICK, clicked);
         return { dispose: () => scope.close() };

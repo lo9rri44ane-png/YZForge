@@ -6,16 +6,17 @@
 
 先保存项目，等待导入和工作台生成完成。复制到一个新的目录，不覆盖已有项目。
 
-| 内容                                                             | 用途                                                      |
-| ---------------------------------------------------------------- | --------------------------------------------------------- |
-| `assets/` 及所有配套 `.meta`                                     | 框架、启动场景、示例和稳定资源 UUID                       |
-| `extensions/yzforge-editor/`、`tools/yzforge/`                   | 工作台、生成器、构建检查，两者需要一起保留                |
-| `config-source/`                                                 | XLSX 源表；仅复制导出 JSON 会丢失可编辑来源               |
-| `project-settings/`，包括 `state/`、`snapshots/` 和 `generated/` | 框架参数、资源逻辑身份、生成文件所有权、已验证的公式结果  |
-| `settings/`、`.creator/`                                         | Creator 项目设置、代码/资源 Bundle 两份预设和默认导入设置 |
-| `package.json`、`package-lock.json`、`tsconfig*.json`            | 项目身份、固定依赖和类型检查                              |
-| `.vscode/`、`.editorconfig`、ESLint/Prettier 配置、`.gitignore`  | 编辑器协作、格式和检查规则                                |
-| `README.md`、`docs/`、`tests/`                                   | 使用说明和框架回归验证                                    |
+| 内容                                                                              | 用途                                                      |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `assets/` 及所有配套 `.meta`                                                      | 框架、启动场景、示例和稳定资源 UUID                       |
+| `extensions/yzforge-editor/`、`tools/yzforge/`                                    | 工作台、生成器、构建检查，两者需要一起保留                |
+| `config-source/`                                                                  | XLSX 源表；仅复制导出 JSON 会丢失可编辑来源               |
+| `project-settings/`，包括 `state/`、`snapshots/` 和 `generated/`                  | 框架参数、资源逻辑身份、生成文件所有权、已验证的公式结果  |
+| `settings/`、`.creator/`                                                          | Creator 项目设置、代码/资源 Bundle 两份预设和默认导入设置 |
+| `package.json`、`package-lock.json`、`tsconfig*.json`                             | 项目身份、固定依赖和类型检查                              |
+| `.vscode/`、`.editorconfig`、`.gitattributes`、ESLint/Prettier 配置、`.gitignore` | 编辑器协作、换行、格式和检查规则                          |
+| `README.md`、`docs/`、`tests/`                                                    | 使用说明和框架回归验证                                    |
+| `.github/workflows/`                                                              | Windows、macOS、Linux 的 Node 自动验证与报告上传          |
 
 当前模板复制时排除：
 
@@ -88,6 +89,8 @@ export function startGame(_app: App, _boot: BootContext): void {}
 工作台备份位于**副本自己的** `.yzforge/trash`。恢复示例时先按依赖恢复 `profile`、`common`，再恢复 `lobby`、`workshop` 和 `showcase`，最后接回 `start-game.ts` 的首屏调用。已移到项目外的 XLSX 也需要归还到原路径。工作台会检查当前文件冲突，不应覆盖后续业务修改。
 
 `tests/examples/` 是可选的示例业务测试，可随示例一起归档；`npm run test:showcase` 需要示例存在。通用 `npm run verify` 不导入这些业务文件。工作台的创建、配置、绑定和恢复功能不依赖示例模块。
+
+`verify:node` 和 `verify:creator` 会运行仍在 `tests/examples/` 中的测试；清理示例时一并归档对应测试。Creator 集成组和运行时性能夹具也依赖具体示例，按 `test:integration -- --list` 的说明调整。预算文件随 `project-settings/` 复制；为新项目重新设定体积预算，并在目标环境记录自己的性能基线。
 
 ## 4. 开始自己的业务
 

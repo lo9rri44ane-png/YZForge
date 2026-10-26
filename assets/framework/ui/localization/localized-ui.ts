@@ -6,7 +6,7 @@ import { MarqueeLabel } from '../components/marquee/marquee-label';
 import type { CountdownLabel } from '../components/countdown/countdown-label';
 import type { AssetAccess } from '../../assets/asset-access';
 import type { AssetKind, BundleRef } from '../../assets/asset-types';
-import { FrameworkError, invariant, OperationCancelled, reportError } from '../../core/errors';
+import { FrameworkError, invariant, OperationCancelled } from '../../core/errors';
 import type { Lifetime } from '../../core/scope';
 import { claimProperties } from '../../core/property-lease';
 import {
@@ -269,7 +269,7 @@ export class LocalizedBundle implements LocalizedBundleAccess {
                 } finally {
                     release();
                     bound?.dispose();
-                    void scope.close().catch(reportError);
+                    void scope.close().catch(scope.report);
                 }
             },
         };

@@ -21,12 +21,15 @@ try{await w.loadURL(args.url);return w.id;}catch(error){w.destroy();throw error;
         { name, url: url.href },
     );
     const target = `const w=require('electron').BrowserWindow.fromId(args.id);if(w?.webContents.__yzforgeIsolatedCheck!==args.name)throw Error('Owned test window missing');`;
-    const run = (code, input = {}) =>
-        editor(
+    const run = async (code, input = {}) => {
+        const result = await editor(
             target +
-                `return await w.webContents.executeJavaScript('(async()=>{const cc=await System.import("cc");const root=cc.director.getScene()?.getChildByName("GameRoot"),entry=root?.getComponent("game.GameRoot"),app=entry?.app;const args='+JSON.stringify(args.input)+';'+args.code+'})()');`,
+                `return await w.webContents.executeJavaScript('(async()=>{try{const cc=await System.import("cc");const root=cc.director.getScene()?.getChildByName("GameRoot"),entry=root?.getComponent("game.GameRoot"),app=entry?.app;const args='+JSON.stringify(args.input)+';return {ok:true,value:await(async()=>{'+args.code+'})()};}catch(error){return {ok:false,message:String(error),stack:error?.stack};}})()');`,
             { id, name, code, input },
         );
+        if (!result.ok) throw Error(result.stack ?? result.message);
+        return result.value;
+    };
     const click = async (nodeExpression) => {
         const position = await run(`
 await new Promise(resolve=>cc.director.once(cc.Director.EVENT_AFTER_DRAW,resolve));

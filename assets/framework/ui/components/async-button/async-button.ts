@@ -1,6 +1,6 @@
 import { _decorator, Button, isValid, Node } from 'cc';
 import { EDITOR } from 'cc/env';
-import { type ErrorReporter, invariant, OperationCancelled, reportError } from '../../../core/errors';
+import { type ErrorReporter, invariant, OperationCancelled } from '../../../core/errors';
 import type { Lifetime, TaskContext } from '../../../core/scope';
 import { ComponentScope, type ComponentContext } from '../../../components/component-scope';
 import { AsyncButtonController } from './async-button-controller';
@@ -83,7 +83,7 @@ export class AsyncButton extends Button {
                             this.onAutomaticActivate(activation);
                     });
                 // 保留忙碌显示直到实际清理结束，再解绑并恢复自动防连点。
-                void handle.completed.then(finish, finish).catch(reportError);
+                void handle.completed.then(finish, finish).catch(this.lifetime.report);
             } else {
                 this.runningConvenience = false;
             }
@@ -100,7 +100,7 @@ export class AsyncButton extends Button {
     bind(
         owner: Lifetime,
         work: (task: TaskContext) => void | Promise<void>,
-        onError: ErrorReporter = reportError,
+        onError: ErrorReporter = owner.report,
     ): AsyncButtonHandle {
         owner.signal.throwIfAborted();
         invariant(
@@ -108,7 +108,7 @@ export class AsyncButton extends Button {
             'ASYNC_BUTTON_SETUP',
             '忙碌提示必须是子节点',
         );
-        void this.clear().catch(reportError);
+        void this.clear().catch(this.lifetime.report);
         const node = this.node;
         const original = this.interactable,
             visual = this.busyVisual;
@@ -134,7 +134,7 @@ export class AsyncButton extends Button {
             };
             claimed = true;
         } catch (error) {
-            void scope.close().catch(reportError);
+            void scope.close().catch(this.lifetime.report);
             throw error;
         }
         const render = () => {
