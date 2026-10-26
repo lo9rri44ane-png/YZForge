@@ -26,7 +26,7 @@ PinK 的当前能力与命令见 [PinK 工作流](pink-workflow.md)。配置和�
 
 ## 命令行检查
 
-先执行 `npm ci`，用 Creator 3.8.8 打开本项目并等待导入完成。`npm run typecheck` 依赖 Creator 生成的 `temp/tsconfig.cocos.json` 和引擎声明。
+先执行 `npm ci`，用 PinK 的目标引擎打开本项目并等待导入完成，再运行 `npm run yz -- doctor`。`npm run typecheck` 依赖该引擎生成的 `temp/tsconfig.cocos.json` 和引擎声明；不要用旧 Creator 的声明缓存代替，也不要同时用两个引擎编辑器打开同一项目目录。
 
 ```powershell
 npm run verify
@@ -44,7 +44,7 @@ npm run test:showcase
 
 [CI 工作流](../.github/workflows/verify.yml) 在 Windows、macOS、Linux 的 Node 22/24 上执行 Node 层，记录 Node 性能样本并上传报告；托管机器之间不自动比较耗时。Node 层不检查依赖 Creator 声明的运行时类型及架构/生成一致性，Creator 层需在已准备编辑器的环境中另行运行。`verify:creator` 可用 `--groups diagnostics,presentation,ui` 缩小集成范围；工作台资产操作、特定构建配置与真机验收仍单独执行。
 
-两层入口和集成组入口均把每步输出及 `report.json` 写入 `.yzforge/verification/`。子进程直接写入日志文件，保留 UTF-8 原始字节；报告记录命令参数、退出码、耗时、Node/操作系统/项目所需 Creator 版本、提交与工作区是否有未提交内容，Git 信息不可用时省略。首个失败停止，保留已执行步骤和失败日志。`verify:creator --groups` 必须选择至少一个功能组，Node 层不接受此参数。缓存目录不提交，应将 CI artifact 或本次报告随验收记录保存。机器进程被强制终止时不能保证报告完整。
+两层入口和集成组入口均把每步输出及 `report.json` 写入 `.yzforge/verification/`。子进程直接写入日志文件，保留 UTF-8 原始字节；报告记录命令参数、退出码、耗时、Node/操作系统、项目声明的 Cocos / CLI 版本、PinK 元数据版本、提交与工作区是否有未提交内容，Git 信息不可用时省略。版本声明不是运行时实测结果。首个失败停止，保留已执行步骤和失败日志。`verify:creator --groups` 必须选择至少一个功能组，Node 层不接受此参数。缓存目录不提交，应将 CI artifact 或本次报告随验收记录保存。机器进程被强制终止时不能保证报告完整。
 
 ## Creator 与运行时检查
 

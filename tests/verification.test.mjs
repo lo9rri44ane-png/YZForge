@@ -11,7 +11,14 @@ import { distribution, comparePerformance, savePerformance } from '../tools/yzfo
 test('verification stops on the first failure and preserves evidence for failed and completed steps', async (t) => {
     const root = await mkdtemp(join(tmpdir(), 'yzforge-verification-'));
     t.after(() => rm(root, { recursive: true, force: true }));
-    await writeFile(join(root, 'package.json'), JSON.stringify({ creator: { version: 'test' } }));
+    await writeFile(
+        join(root, 'package.json'),
+        JSON.stringify({
+            cocos: { version: '4.0.0-beta.0' },
+            cli: { version: '0.2.0-beta.0' },
+            pink: { version: '1.127.0' },
+        }),
+    );
     await assert.rejects(
         runVerification(root, 'probe', [
             { name: 'first', args: ['-e', 'console.log("first-output")'] },
@@ -30,6 +37,9 @@ test('verification stops on the first failure and preserves evidence for failed 
     assert.equal(report.steps[1].exitCode, 3);
     assert.match(await readFile(join(root, report.steps[1].log), 'utf8'), /failure-output/);
     assert.ok(report.finishedAt && report.environment.node);
+    assert.equal(report.environment.cocos, '4.0.0-beta.0');
+    assert.equal(report.environment.cli, '0.2.0-beta.0');
+    assert.equal(report.environment.pink, '1.127.0');
 });
 
 test('performance comparison rejects incompatible environments and cannot pass a missing or regressed metric', () => {

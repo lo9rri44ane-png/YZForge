@@ -79,7 +79,7 @@ export async function runCommand(argv, defaultRoot = fileURLToPath(new URL('../.
         const root = await realpath(resolve(values.project ?? defaultRoot));
         const action = positionals[0];
         let result;
-        if (command === 'doctor') result = await (await import('./operations/doctor.mjs')).doctor(root);
+        if (command === 'doctor') result = await (await import('./operations/doctor.mjs')).doctor(root, runtime);
         else if (command === 'watch')
             result = await (
                 await import('./operations/watch.mjs')

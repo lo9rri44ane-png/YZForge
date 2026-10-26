@@ -3,16 +3,16 @@ import { freezeGameConfig } from '../../../framework/app/game-config';
 /** 当前运行配置；地址与 SDK 参数在运行期间保持不变。 */
 export const gameConfig = freezeGameConfig({
     appVersion: '1.0.0',
-    channel: 'web_local',
-    mode: 'debug',
+    channel: 'wechat_self',
+    mode: 'release',
     environment: 'dev',
-    channelName: 'Web · 开发',
-    platform: 'web',
-    buildTargets: ['web-mobile', 'web-desktop'],
-    platformAppId: '',
+    channelName: '微信 · 自发行',
+    platform: 'wechat',
+    buildTargets: ['wechatgame'],
+    platformAppId: 'wx18786e6d01c6cc22',
     diagnostics: {
-        logLevel: 'debug',
-        showStats: true,
+        logLevel: 'warn',
+        showStats: false,
     },
     endpoints: {
         apiBaseUrl: '',
@@ -33,5 +33,5 @@ export const gameConfig = freezeGameConfig({
         timeoutMs: 10000,
     },
     previewMockSdk: false,
-    configHash: '7a981197f3ac44b33eb6d772959e17975246336bfc9f2984c58ea03388cf1789',
+    configHash: 'e25ccccd23fec3ef658249735bdb203e105adfcce4d2a56f11eb20bfe5aec1c9',
 });

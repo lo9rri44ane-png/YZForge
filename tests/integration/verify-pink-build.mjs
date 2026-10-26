@@ -119,6 +119,7 @@ try {
     }
     const pkg = JSON.parse(await readFile(join(project, 'package.json'), 'utf8'));
     pkg.uuid = randomUUID();
+    if (pkg.pink) pkg.pink.uuid = randomUUID();
     await writeFile(join(project, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
     execFileSync('git', ['init', '--quiet', '--initial-branch=trial', project], { windowsHide: true });
     await writeFile(join(directory, 'source-hashes.json'), JSON.stringify(hashes, null, 2) + '\n');

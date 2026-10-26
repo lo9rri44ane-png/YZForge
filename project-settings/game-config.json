@@ -2,8 +2,8 @@
   "formatVersion": 3,
   "selection": {
     "appVersion": "1.0.0",
-    "channel": "web_local",
-    "mode": "debug",
+    "channel": "wechat_self",
+    "mode": "release",
     "environment": "dev"
   },
   "modes": {
@@ -58,7 +58,7 @@
     "wechat_self": {
       "name": "微信 · 自发行",
       "platform": "wechat",
-      "platformAppId": "",
+      "platformAppId": "wx18786e6d01c6cc22",
       "ads": {
         "revive": "",
         "double_reward": ""
@@ -197,9 +197,23 @@
     }
   },
   "platforms": {
-    "web": ["web-mobile", "web-desktop"],
-    "wechat": ["wechatgame"],
-    "douyin": ["bytedance-mini-game"],
-    "native": ["android", "ios", "windows", "mac", "ohos", "harmonyos-next"]
+    "web": [
+      "web-mobile",
+      "web-desktop"
+    ],
+    "wechat": [
+      "wechatgame"
+    ],
+    "douyin": [
+      "bytedance-mini-game"
+    ],
+    "native": [
+      "android",
+      "ios",
+      "windows",
+      "mac",
+      "ohos",
+      "harmonyos-next"
+    ]
   }
 }

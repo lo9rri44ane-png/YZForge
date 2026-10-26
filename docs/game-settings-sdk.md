@@ -133,6 +133,17 @@ npm run yz -- config build-options --platform web-mobile
 
 显式设置 `preview.mockSdk: true` 后重新预览，可模拟整套 SDK，真实发行和广告 SDK 不初始化。`sdk.simulation.nextAd` 支持 `completed` / `skipped` / `error`，默认 `skipped`；`failNextLogin` 模拟一次登录失败。模拟结果始终带 `simulated: true`，构建禁止开启模拟。Debug 模式本身不启用模拟。
 
+## 微信启动提示平台不一致
+
+若提示“目标平台 web 与实际宿主 wechat 不一致”，应检查当前渠道及打包时的生成配置，而不是关闭宿主校验。`web_local` 只用于 Web；微信自发行使用已定义的 `wechat_self`，合作发行另选对应渠道。
+
+1. 执行 `npm run yz -- config show`，再执行 `npm run yz -- config set --channel wechat_self`。省略其他参数会保留游戏版本、模式和服务环境；开发联调可保留 Debug / Dev，不必强制切换 Release / Prod。
+2. 核对该渠道的 `platformAppId` 与本次微信项目 AppID 一致；不能把平台默认值或另一个旧包的 AppID 自动当作本次项目身份。
+3. 执行 `npm run generate`、`npm run check`、`npm run typecheck`，再执行 `npm run yz -- config build-options --platform wechatgame`。任一步失败先修复，不绕过检查，也不手改生成文件。
+4. 使用导出的完整 `options` 重新构建微信目标，将微信开发者工具指向此次新输出目录。不能复用此前包含 Web 配置的旧产物；重新编译旧包不会更新项目源配置。
+
+导出入口已有目标、Debug、模拟 SDK 和 AppID 校验；旧扩展钩子不是 PinK 原生构建入口已自动接入这些检查的证据。PinK 支持的平台与构建任务能力须查询当前环境；实际构建及开发者工具运行分别验收，不能以生成或静态检查成功替代。
+
 ## 默认共用存档
 
 存储前缀继续使用 `framework.json` 的 **`appId + ':'`**，不增加渠道、环境、模式或游戏版本；原有存档直接读取。`storage.in(...)` 账号或存档槽仍由业务显式选择。

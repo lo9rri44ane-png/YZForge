@@ -102,6 +102,8 @@ test('游戏构建：核对真实 debug、平台、AppID；禁止预览模拟进
         /模拟 SDK/,
     );
     const wechat = config.resolveConfig(source, { ...selection, channel: 'wechat_self' });
+    // 缺失 AppID 是此用例的输入，不依赖项目当前是否已填写真实微信身份。
+    wechat.platformAppId = '';
     assert.throws(
         () => config.assertBuild(wechat, { platform: 'wechatgame', debug: wechat.mode === 'debug' }),
         /platformAppId/,
@@ -115,6 +117,13 @@ test('游戏构建：核对真实 debug、平台、AppID；禁止预览模拟进
                 packages: { wechatgame: { appid: 'wx_other' } },
             }),
         /AppID/,
+    );
+    assert.doesNotThrow(() =>
+        config.assertBuild(wechat, {
+            platform: 'wechatgame',
+            debug: true,
+            packages: { wechatgame: { appid: 'wx_fixture' } },
+        }),
     );
 });
 test('游戏构建：冻结快照、互斥、配置漂移检测、释放后可以重复构建', async () => {
