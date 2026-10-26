@@ -99,7 +99,7 @@ export function startGame(_app: App, _boot: BootContext): void {}
 1. 工作台创建模块，按需选择随应用加载或按需代码；只有配置/资源时使用纯资源模块。
 2. 创建 Page、Part、Service 或 XLSX，确认文件预览；预制体通过 Creator 编辑，命名节点通过工作台自动绑定。
 3. 在 `start-game.ts` 导入新模块公开的 `ViewKey`，用 `app.ui.pushPage(页面Key, 参数, boot.scope)` 打开首屏。后续页面通过 `show.ui` 跳转；需要多步业务协调时放在所属模块，通过公开 API 调用依赖。
-4. 保存 `Bootstrap/GameRoot/GameSettings` 的四项选择，从 **YZForge → 游戏设置 → 导出构建参数** 导出并导入 Creator 构建面板，使用 `Bootstrap.scene` 启动。补齐目标平台参数；切换配置后重新导出，避免沿用旧任务。
+4. 通过 `npm run yz -- config set` 修改 JSON 启动选择，生成并检查后用 `config build-options` 导出参数，使用 `Bootstrap.scene` 启动。当前 PinK 构建验收见 [PinK 工作流](pink-workflow.md)，不转调 Creator。
 
 通用框架的模块、Scope、UI、音频、资源、配置和时间 API 见 [API 使用指南](api-guide.md)。示例清理后 `npm run verify` 仍应通过；专门操作大厅按钮的集成测试依赖示例，不属于空项目的运行要求。
 

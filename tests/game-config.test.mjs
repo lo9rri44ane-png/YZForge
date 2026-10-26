@@ -71,7 +71,7 @@ test('游戏配置：增加复用 SDK 的渠道只需配置；已删除渠道不
     delete source.channels.web_local;
     assert.match(config.channelOptionsSource(source), /发行商 B/);
     assert.throws(() => config.resolveConfig(source, selection), /渠道不存在/);
-    assert.throws(() => config.validate({ ...source, selection }), /不支持字段 selection/);
+    assert.throws(() => config.validate({ ...source, selection: { ...selection, mode: 'invalid' } }), /mode/);
 });
 
 test('游戏配置：新平台的构建映射由 JSON 登记', () => {
@@ -123,22 +123,9 @@ test('游戏构建：冻结快照、互斥、配置漂移检测、释放后可�
     try {
         const source = fixture();
         const snapshot = config.resolveConfig(source, selection);
-        const savedScene = [
-            { __type__: 'cc.SceneAsset' },
-            { __type__: 'cc.Scene' },
-            { __type__: 'cc.Node', _name: 'GameRoot', _parent: { __id__: 1 }, _components: [{ __id__: 3 }] },
-            {
-                __type__: 'game.GameSettings',
-                appVersion: selection.appVersion,
-                channelId: selection.channel,
-                mode: 0,
-                environment: 0,
-            },
-        ];
+        source.selection = { ...selection };
         for (const [file, value] of [
             [config.sourcePath, JSON.stringify(source)],
-            [config.selectionPath, JSON.stringify(savedScene)],
-            [config.componentMetaPath, JSON.stringify({ uuid: '17725982-0e26-487f-990c-f0dd249803d5' })],
             [config.snapshotPath, JSON.stringify(snapshot)],
             [config.outputPath, 'export const gameConfig = {};'],
         ]) {
@@ -154,8 +141,8 @@ test('游戏构建：冻结快照、互斥、配置漂移检测、释放后可�
         await assert.rejects(config.assertUnlocked(root), /游戏构建正在使用/);
         await assert.rejects(build.begin(root, options), /已有游戏构建/);
         assert.equal((await build.verify(lease)).configHash, snapshot.configHash);
-        savedScene[3].environment = 2;
-        await writeFile(join(root, config.selectionPath), JSON.stringify(savedScene));
+        source.selection.environment = 'prod';
+        await writeFile(join(root, config.sourcePath), JSON.stringify(source));
         await assert.rejects(build.verify(lease), /发生变化/);
         await build.end({ ...lease, buildId: 'not-the-owner' });
         await access(join(root, '.yzforge/game-build.lock'));
@@ -214,7 +201,7 @@ test('构建恢复：只移除已退出进程的锁，活动构建、未知状�
         await config.assertUnlocked(root);
         assert.deepEqual(await build.recover(root), { recovered: false });
         await save(stale);
-        assert.deepEqual(await build.recover(root), { recovered: true, buildId: 'interrupted' });
+        await assert.rejects(build.recover(root), /状态不可确认/);
         await save({ pid });
         await assert.rejects(build.recover(root), /缺少有效进程和任务标识/);
         await access(file);

@@ -1,4 +1,4 @@
-// 自动生成：GameSettings 已保存的选择 + project-settings/game-config.json 渠道参数。
+// 自动生成：启动选择与渠道参数均来自 project-settings/game-config.json。
 import { freezeGameConfig } from '../../../framework/app/game-config';
 /** 当前运行配置；地址与 SDK 参数在运行期间保持不变。 */
 export const gameConfig = freezeGameConfig({

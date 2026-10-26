@@ -6,8 +6,7 @@ const path = require('node:path');
 const sourcePath = 'project-settings/game-config.json';
 const outputPath = 'assets/game/app/generated/game-config.ts';
 const snapshotPath = 'project-settings/generated/game-config.json';
-const selectionPath = 'assets/game/boot/Bootstrap.scene';
-const componentMetaPath = 'assets/game/boot/GameSettings.ts.meta';
+const bootstrapPath = 'assets/game/boot/Bootstrap.scene';
 const channelOptionsPath = 'assets/game/app/generated/channel-options.ts';
 const buildLockPath = '.yzforge/game-build.lock';
 const modes = ['debug', 'release'];
@@ -71,8 +70,9 @@ function validateSelection(selection) {
     return selection;
 }
 function validate(source) {
-    record(source, 'game-config', ['formatVersion', 'modes', 'channels', 'preview', 'platforms']);
-    if (source.formatVersion !== 2) throw Error('不支持的游戏配置版本；四项选择应保存在 GameSettings 组件');
+    record(source, 'game-config', ['formatVersion', 'selection', 'modes', 'channels', 'preview', 'platforms']);
+    if (source.formatVersion !== 3) throw Error('游戏配置必须使用 formatVersion: 3，并在 selection 中声明启动选择');
+    validateSelection(source.selection);
     record(source.platforms, 'platforms');
     for (const [id, targets] of Object.entries(source.platforms)) {
         identifier(id, '平台 ID');
@@ -190,42 +190,13 @@ function assertBuild(config, options) {
 async function readSource(root) {
     return validate(JSON.parse(await fs.readFile(path.join(root, sourcePath), 'utf8')));
 }
-/** 只读 Creator 已保存的场景；场景的写入、撤销和 UUID 维护交给 Creator。 */
+/** 启动选择与渠道参数来自同一份项目源文件，不读取编辑器场景。 */
 async function readSelection(root) {
-    const [scene, meta] = await Promise.all([
-        fs.readFile(path.join(root, selectionPath), 'utf8').then(JSON.parse),
-        fs.readFile(path.join(root, componentMetaPath), 'utf8').then(JSON.parse),
-    ]);
-    if (!Array.isArray(scene)) throw Error('Bootstrap.scene 格式无效');
-    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    const hex = meta.uuid.replaceAll('-', '');
-    let classId = hex.slice(0, 5);
-    for (let i = 5; i < hex.length; i += 3) {
-        const value = parseInt(hex.slice(i, i + 3), 16);
-        classId += alphabet[value >> 6] + alphabet[value & 63];
-    }
-    const roots = scene.filter(
-        (item) =>
-            item.__type__ === 'cc.Node' &&
-            item._name === 'GameRoot' &&
-            scene[item._parent?.__id__]?.__type__ === 'cc.Scene',
-    );
-    if (roots.length !== 1) throw Error('Bootstrap 必须有唯一的 GameRoot 根节点');
-    const components = (roots[0]._components ?? [])
-        .map((ref) => scene[ref.__id__])
-        .filter((item) => [classId, meta.uuid, 'game.GameSettings'].includes(item?.__type__));
-    if (components.length !== 1) throw Error('请在 Bootstrap/GameRoot 添加并保存唯一的 GameSettings');
-    const component = components[0];
-    return validateSelection({
-        appVersion: component.appVersion,
-        channel: component.channelId,
-        mode: modes[component.mode],
-        environment: environments[component.environment],
-    });
+    return (await readSource(root)).selection;
 }
 async function readConfig(root) {
-    const [source, selection] = await Promise.all([readSource(root), readSelection(root)]);
-    return resolveConfig(source, selection);
+    const source = await readSource(root);
+    return resolveConfig(source, source.selection);
 }
 /** 仅公开渠道 ID 和显示名，原生枚举的数值不进入场景存档。 */
 function channelOptionsSource(source) {
@@ -237,7 +208,7 @@ async function assertUnlocked(root) {
         const lock = JSON.parse(await fs.readFile(path.join(root, buildLockPath), 'utf8'));
         throw Object.assign(
             Error(
-                `游戏构建正在使用配置（${lock.channel} / ${lock.mode} / ${lock.environment}）；中断后可使用 YZForge → 游戏设置 → 恢复中断的构建`,
+                `游戏构建正在使用配置（${lock.channel} / ${lock.mode} / ${lock.environment}）；请等待真实构建结束，任务状态无法确认时保留锁`,
             ),
             { code: 'GAME_BUILD_BUSY' },
         );
@@ -249,8 +220,7 @@ module.exports = {
     sourcePath,
     outputPath,
     snapshotPath,
-    selectionPath,
-    componentMetaPath,
+    bootstrapPath,
     channelOptionsPath,
     buildLockPath,
     modes,

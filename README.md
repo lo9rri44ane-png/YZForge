@@ -1,6 +1,6 @@
 # YZForge
 
-基于 **Cocos Creator 3.8.8** 的通用游戏框架，面向小游戏、Web 和原生项目。提供模块与资源包管理、UI、自动绑定、音频、配置表、时间及本地存档，并配有 Creator 工作台。
+基于 Cocos 的通用游戏框架，面向小游戏、Web 和原生项目。当前在 **PinK** 中开发，通过命令维护配置、源码和生成物。原生编辑能力与验证边界见 [PinK 工作流](docs/pink-workflow.md)；旧 Creator 工作台不作为 PinK 的操作依赖。
 
 可以直接复制本项目开始开发。项目自带可运行的示例，也支持清理示例后从空框架开始。
 
@@ -16,7 +16,7 @@ AI 协作入口见 [AGENTS.md](AGENTS.md)，按任务查找契约、现有工具
 | 虚拟列表       | 纵向固定网格、变高列表、横向固定单行，支持 Part 复用、局部刷新和定位；见 [使用文档](docs/virtual-list.md) |
 | 通用 UI 组件   | 安全区 Widget、原生按钮/图片扩展、倒计时、子节点切换、超宽滚动文本；见 [使用文档](docs/ui-components.md)  |
 | 红点与数量     | 分组聚合、批量更新、页面/条目订阅清理；见 [使用文档](docs/badges.md)                                      |
-| 游戏设置与 SDK | GameRoot 原生设置、JSON 渠道参数、构建校验、可组合 SDK；见 [使用文档](docs/game-settings-sdk.md)          |
+| 游戏设置与 SDK | JSON 启动配置、渠道参数、构建校验、可组合 SDK；见 [使用文档](docs/game-settings-sdk.md)                   |
 | HTTP 网络      | JSON 验证、超时、Scope 取消、XHR 与微信/抖音传输适配；见 [使用文档](docs/network.md)                      |
 | 新手引导       | 检查点恢复、稳定目标、圆形与矩形连续聚焦；见 [使用文档](docs/guide.md)                                    |
 | 资源管理       | 生成资源 Key、批量准备与进度、Prefab 实例池；见 [使用文档](docs/resources.md)                             |
@@ -31,19 +31,19 @@ AI 协作入口见 [AGENTS.md](AGENTS.md)，按任务查找契约、现有工具
 
 环境要求：
 
-- **Cocos Creator 3.8.8**。
+- **PinK**；引擎版本及当前验证范围见 [PinK 工作流](docs/pink-workflow.md)。
 - **Node.js 22.x（22.13 及以上）或 24 及以上版本**。
-- 推荐使用 VS Code，安装工作区推荐的 **ESLint** 和 **Prettier** 插件。
+- 在 PinK 打开项目根目录。
 
 使用步骤：
 
 1. 将项目复制到新目录，保留 `.meta` 和项目设置，排除缓存、构建产物及本机配置。文件清单与标识设置见 [复制项目与清理示例](docs/copy-project.md)。
 2. 在项目根目录执行 `npm ci`。
-3. 用 Creator 打开项目，等待资源导入和脚本编译完成。
-4. 确认项目扩展 `yzforge-editor` 已启用，打开 **YZForge → 项目工作台**。
-5. 打开 [Bootstrap.scene](assets/game/boot/Bootstrap.scene)，运行预览。
+3. 用 PinK 打开项目，等待资源导入和脚本编译完成。
+4. 执行 `npm run yz -- doctor`、`npm run generate` 和 `npm run verify`，确认类型声明对应实际目标引擎。
+5. 打开 [Bootstrap.scene](assets/game/boot/Bootstrap.scene)，运行 PinK 预览。原生预览按钮不会自动执行上述框架检查。
 
-预览首先进入“功能实验室”。建议先体验“正式业务流程 · 任务奖励”，再打开工作台的“示例工作流”，对照 Service、ViewModel、Page 和 Part 的真实代码。其他入口展示 UI、资源、配置、时间、音频、存档与失败恢复。
+预览首先进入“功能实验室”。建议先体验“正式业务流程 · 任务奖励”，对照 [示例工作流](docs/development-workflow.md) 中 Service、ViewModel、Page 和 Part 的真实代码。其他入口展示 UI、资源、配置、时间、音频、存档与失败恢复。
 
 - [目录与依赖规则](docs/architecture.md)：模块布局、公开入口、文件所有权和工具职责。
 - [正式开发工作流](docs/development-workflow.md)：从创建模块到业务、渲染、绑定和验证。
@@ -51,7 +51,7 @@ AI 协作入口见 [AGENTS.md](AGENTS.md)，按任务查找契约、现有工具
 
 启动接入点是 [start-game.ts](assets/game/app/start-game.ts)，在这里选择首屏。`GameRoot` 负责框架装配和启动状态显示，`app/generated` 由工作台生成。业务规则、状态、页面以及多步业务协调都放在所属模块的 `code` 中。页面通过 `show.ui` 打开其他界面和返回；单纯跳转不需要再写一个导航类。
 
-`Bootstrap/GameRoot` 上的 `GameSettings` 提供游戏版本、渠道、构建模式和服务环境四项选择。地址、公开 AppID 和 SDK 参数维护在 `project-settings/game-config.json`。默认本地存档继续共用，切换这些选项不会建立新存档。
+游戏版本、渠道、构建模式、服务环境以及地址、公开 AppID、SDK 参数统一维护在 `project-settings/game-config.json`。`npm run yz -- config set` 修改启动选择，`GameSettings` 只读取生成快照。默认本地存档共用，切换这些选项不会建立新存档。
 
 项目附带 `showcase`、`workshop`、`lobby`、`profile`、`common` 五个示例模块，展示功能实验、任务流程、界面交互、共享服务和公共配置。示例模块可以按需清理，具体见 [示例应用说明](docs/example-app.md)。
 

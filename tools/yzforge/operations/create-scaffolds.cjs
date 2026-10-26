@@ -142,13 +142,18 @@ exports.scaffold = async function (p, args) {
                 directory,
                 component
                     ? layout.itemPaths('component', naming.named(args.id, args.kind).id, { className: type }).directory
-                    : 'code/services',
+                    : args.kind === 'viewmodel'
+                      ? 'code/presentation'
+                      : 'code/services',
             );
         await ensureFolder(folder);
         const framework = path.relative(folder, inside('assets/framework')).replaceAll('\\', '/');
-        const content = component
-            ? `import { _decorator } from 'cc';\nimport { GameComponent, ActivationContext } from '${framework}/components/game-component';\nconst { ccclass } = _decorator;\n/** 普通框架组件；业务使用 onInit/onActivate/onTick 等钩子，不覆盖引擎 onLoad/update。 */\n@ccclass('${manifest.id}.${type}')\nexport class ${type} extends GameComponent {\n  /** 绑定与模块上下文就绪后执行一次，同步初始化组件自身状态。 */\n  protected onInit(): void {}\n  /**\n   * 每次业务激活执行；异步工作放入 _activation.run，并通过 task.commit 安全提交结果。\n   * @param _activation - 本次激活上下文；失活时取消，下一次激活会得到新的上下文。\n   */\n  protected onActivate(_activation: ActivationContext): void {\n    // 不把钩子改成 async：使用 _activation.run(async task => { ...; task.commit(() => { ... }); });\n  }\n}\n`
-            : `import type { ModuleContext } from '${framework}/modules/module-manager';\n/** 普通业务服务，用于可被多个界面共享的状态和业务规则；不依赖 Cocos 组件生命周期。 */\nexport class ${type} {\n  /**\n   * 创建服务；由模块工厂持有实例，需释放的监听或资源登记到对应 Scope。\n   * @param ctx - 宿主模块上下文；ctx.scope 覆盖本次模块业务实例。\n   */\n  constructor(private readonly ctx: ModuleContext) {}\n}\n`;
+        const content =
+            args.kind === 'viewmodel'
+                ? `/** 普通界面模型；通过构造参数显式接收业务依赖，不持有引擎节点。 */\nexport class ${type} {}\n`
+                : component
+                  ? `import { _decorator } from 'cc';\nimport { GameComponent, ActivationContext } from '${framework}/components/game-component';\nconst { ccclass } = _decorator;\n/** 普通框架组件；业务使用 onInit/onActivate/onTick 等钩子，不覆盖引擎 onLoad/update。 */\n@ccclass('${manifest.id}.${type}')\nexport class ${type} extends GameComponent {\n  /** 绑定与模块上下文就绪后执行一次，同步初始化组件自身状态。 */\n  protected onInit(): void {}\n  /**\n   * 每次业务激活执行；异步工作放入 _activation.run，并通过 task.commit 安全提交结果。\n   * @param _activation - 本次激活上下文；失活时取消，下一次激活会得到新的上下文。\n   */\n  protected onActivate(_activation: ActivationContext): void {\n    // 不把钩子改成 async：使用 _activation.run(async task => { ...; task.commit(() => { ... }); });\n  }\n}\n`
+                  : `import type { ModuleContext } from '${framework}/modules/module-manager';\n/** 普通业务服务，用于可被多个界面共享的状态和业务规则；不依赖 Cocos 组件生命周期。 */\nexport class ${type} {\n  /**\n   * 创建服务；由模块工厂持有实例，需释放的监听或资源登记到对应 Scope。\n   * @param ctx - 宿主模块上下文；ctx.scope 覆盖本次模块业务实例。\n   */\n  constructor(private readonly ctx: ModuleContext) {}\n}\n`;
         const target = path.join(folder, `${type}.ts`);
         return writeScript('create-asset', target, content);
     }
@@ -493,6 +498,7 @@ export class ${className} extends ${className}Binding {
         table: createTableTemplate,
         localization: createLocalization,
         service: createScript,
+        viewmodel: createScript,
         component: createScript,
         part: createPrefab,
         prefab: createPrefab,

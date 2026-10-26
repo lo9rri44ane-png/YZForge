@@ -206,9 +206,18 @@ function runTool(command, extra = []) {
     return new Promise((resolve, reject) =>
         execFile(
             'node',
-            [inside('tools/yzforge/cli.mjs'), command, '--editor', ...extra],
+            [inside('tools/yzforge/cli.mjs'), command, ...extra],
             { cwd: root(), windowsHide: true, timeout: 120000, maxBuffer: 4 * 1024 * 1024 },
             (error, stdout, stderr) => {
+                // A completed write with consumer diagnostics still needs an asset refresh.
+                if (error && stdout) {
+                    try {
+                        const value = JSON.parse(stdout);
+                        if (value.status === 'applied-needs-fix') return resolve(value);
+                    } catch {
+                        /* Preserve the original command failure below. */
+                    }
+                }
                 if (error) {
                     let message = stderr || stdout || error.message;
                     let code;
@@ -325,7 +334,7 @@ const actions = {
             request: (...args) => Editor.Message.request(...args),
         });
         await gameSettings.refreshChannels();
-        const preview = await runTool('preview'),
+        const preview = await runTool('generate', ['--dry-run']),
             obsoleteSet = new Set(preview.obsolete.map((item) => inside(item).toLowerCase())),
             managedSet = new Set(
                 [...preview.outputPaths, ...preview.obsolete].map((item) => inside(item).toLowerCase()),
@@ -382,7 +391,7 @@ const actions = {
             );
         return result;
     },
-    previewTables: () => runTool('preview', ['--preview-formulas']),
+    previewTables: () => runTool('generate', ['--dry-run', '--preview-formulas']),
     recalculate: (args) => runTool('recalculate', ['--source', args.source]),
     async updateSettings(args) {
         const target = inside('project-settings/framework.json'),
@@ -574,7 +583,6 @@ function assetChanged(...args) {
 exports.load = function () {
     autoEnabled = true;
     syncFs.watchFile(inside(gameConfigTools.sourcePath), { interval: 1000 }, scheduleGeneration);
-    syncFs.watchFile(inside(gameConfigTools.selectionPath), { interval: 1000 }, scheduleGeneration);
     scheduleGeneration();
     Editor.Message.addBroadcastListener('asset-db:ready', scheduleGeneration);
     for (const event of assetEvents) Editor.Message.addBroadcastListener(event, assetChanged);
@@ -595,7 +603,6 @@ exports.load = function () {
 exports.unload = function () {
     autoEnabled = false;
     syncFs.unwatchFile(inside(gameConfigTools.sourcePath), scheduleGeneration);
-    syncFs.unwatchFile(inside(gameConfigTools.selectionPath), scheduleGeneration);
     clearTimeout(autoTimer);
     sourceWatcher?.close();
     sourceWatcher = undefined;

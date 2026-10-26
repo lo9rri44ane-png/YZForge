@@ -67,9 +67,17 @@ exports.withProjectLock = async function (root, action) {
         lock = await fs.open(target, 'wx');
     } catch (error) {
         if (error.code === 'EEXIST')
-            throw Error(
-                'Generation is already running or was interrupted. Inspect .yzforge/generation.lock before recovery.',
-                { cause: error },
+            throw Object.assign(
+                Error(
+                    'Generation is already running or was interrupted. Inspect .yzforge/generation.lock before recovery.',
+                    { cause: error },
+                ),
+                {
+                    code: await readLock(target).then(
+                        (state) => (state.active || state.raw === null ? 'YZ_PROJECT_BUSY' : 'YZ_PROJECT_LOCKED'),
+                        () => 'YZ_PROJECT_LOCKED',
+                    ),
+                },
             );
         throw error;
     }

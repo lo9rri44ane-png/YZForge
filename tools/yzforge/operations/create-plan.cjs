@@ -52,12 +52,19 @@ exports.planCreation = async function (ctx, input) {
         target = inside(target);
         const file = rel(target),
             current = await track(target);
+        if (ctx.sourceOnly && file.startsWith('assets/')) {
+            const metadata = await track(target + '.meta');
+            if (!current && metadata)
+                throw Object.assign(Error('目标存在孤立元数据，需先通过 PinK 核对资源身份：' + file), {
+                    code: 'YZ_PINK_CAPABILITY',
+                });
+        }
         if (!files.has(file))
             files.set(file, {
                 path: file,
                 operation: current ? (mode === 'create' ? 'conflict' : 'update') : 'create',
             });
-        if (file.startsWith('assets/') && !file.endsWith('.meta')) {
+        if (!ctx.sourceOnly && file.startsWith('assets/') && !file.endsWith('.meta')) {
             const metadata = await track(target + '.meta');
             if (!files.has(file + '.meta'))
                 files.set(file + '.meta', { path: file + '.meta', operation: metadata ? 'existing' : 'Creator' });
@@ -89,7 +96,11 @@ exports.planCreation = async function (ctx, input) {
         const file = await touch(target, mode);
         const index = add({ kind, path: file, content, encoding, mode });
         planned.add(file);
-        return { uuid: reference(index, 'uuid'), url: url(inside(target)), file: inside(target) };
+        return {
+            ...(!ctx.sourceOnly ? { uuid: reference(index, 'uuid') } : {}),
+            url: url(inside(target)),
+            file: inside(target),
+        };
     };
     const writeScript = async (operation, target, content) => {
         const source = ts.createSourceFile(target, content, ts.ScriptTarget.Latest, true);
@@ -273,9 +284,21 @@ exports.planCreation = async function (ctx, input) {
             });
         },
     };
-    await ctx.assertBindingSceneSaved();
+    if (!ctx.sourceOnly) await ctx.assertBindingSceneSaved();
     const result = await scaffold(p, request);
-    const plan = { request, steps, inputs, files: [...files.values()], result, resolution: p.resolution };
+    if (ctx.sourceOnly && steps.some((step) => ['scene', 'compile', 'bundle'].includes(step.kind)))
+        throw Object.assign(Error('此创建需要 PinK 场景或资源操作接口；源文件尚未写入'), {
+            code: 'YZ_PINK_CAPABILITY',
+        });
+    const plan = {
+        request,
+        steps,
+        inputs,
+        files: [...files.values()],
+        result,
+        resolution: p.resolution,
+        sourceOnly: !!ctx.sourceOnly,
+    };
     return {
         ...plan,
         conflicts: plan.files.filter((file) => file.operation === 'conflict').map((file) => file.path),
@@ -284,12 +307,21 @@ exports.planCreation = async function (ctx, input) {
 };
 
 exports.assertPlan = async function (ctx, plan) {
+    await ctx.beforeApply?.();
     const { signature, conflicts, ...body } = plan;
     if (hash(body) !== signature || conflicts.length) throw Error('创建计划无效或存在文件冲突');
+    if (plan.sourceOnly !== !!ctx.sourceOnly) throw Error('创建计划的执行环境不匹配');
+    if (
+        plan.sourceOnly &&
+        plan.steps.some(
+            (step) => !['directory', 'write', 'json'].includes(step.kind) || /\.(scene|prefab|meta)$/.test(step.path),
+        )
+    )
+        throw Error('源创建计划包含原生操作，拒绝执行');
     for (const [file, before] of Object.entries(plan.inputs))
         if (hash(await snapshot(ctx.inside(file))) !== hash(before)) throw Error('创建条件已变化，请重新预览：' + file);
     if (hash(await ctx.designResolution()) !== hash(plan.resolution)) throw Error('设计分辨率已变化，请重新预览');
-    await ctx.assertBindingSceneSaved();
+    if (!plan.sourceOnly) await ctx.assertBindingSceneSaved();
 };
 exports.resolveStepValues = function resolveValues(value, results) {
     if (!value || typeof value !== 'object') return value;

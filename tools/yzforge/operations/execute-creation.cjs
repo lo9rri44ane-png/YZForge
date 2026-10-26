@@ -41,7 +41,7 @@ exports.executeCreation = async function (ctx, plan) {
                     continue;
                 }
                 const target = ctx.inside(step.path),
-                    native = step.path.startsWith('assets/');
+                    native = !plan.sourceOnly && step.path.startsWith('assets/');
                 if (step.kind === 'bundle') {
                     // 原生导入完成后才知道目录 UUID；保留整份旧元数据并记录这一步的预期修改。
                     const meta = await ctx.request('asset-db', 'query-asset-meta', ctx.url(target));

@@ -26,13 +26,7 @@ async function fixture(t) {
 test('生成诊断保留过期检查、先写产物再报告类型错误以及修复后的成功状态', async (t) => {
     const f = await fixture(t);
     // 只复制启动配置输入；所有写入和故障注入均在临时项目中。
-    for (const file of [
-        '.prettierrc.json',
-        'project-settings/framework.json',
-        gameConfig.sourcePath,
-        gameConfig.selectionPath,
-        gameConfig.componentMetaPath,
-    ])
+    for (const file of ['.prettierrc.json', 'project-settings/framework.json', gameConfig.sourcePath])
         await f.put(file, await readFile(new URL('../' + file, import.meta.url), 'utf8'));
     await f.put('assets/game/boot/GameSettings.ts', 'export {};');
     for (const file of ['app/app', 'assets/asset-types', 'app/game-config', 'modules/module-manager', 'ui/ui-manager'])
@@ -78,7 +72,6 @@ test('生成诊断保留过期检查、先写产物再报告类型错误以及�
     await f.put(obsolete, content);
     await f.put('project-settings/state/generated-files.json', { ...owned, [obsolete]: digest(content) });
     await assert.rejects(generate(f.root), (error) => {
-        assert.match(error.message, /^Use the Creator workbench/);
         assert.equal(error.diagnostics[0].code, 'YZ_GENERATED_OBSOLETE');
         assert.equal(error.diagnostics[0].file, obsolete);
         return true;
@@ -142,7 +135,7 @@ test('序列化绑定的收集和抛错模式保留原文本，附带资产路�
     });
 });
 
-test('CLI 通用错误仍写入 stderr 并返回 1，同时提供可解析的兜底诊断', async () => {
+test('CLI 错误以统一 JSON 写入 stdout 并返回 1', async () => {
     await assert.rejects(
         promisify(execFile)(
             process.execPath,
@@ -151,12 +144,12 @@ test('CLI 通用错误仍写入 stderr 并返回 1，同时提供可解析的兜
         ),
         (error) => {
             assert.equal(error.code, 1);
-            assert.equal(error.stdout, '');
-            const report = JSON.parse(error.stderr);
+            assert.equal(error.stderr, '');
+            const report = JSON.parse(error.stdout);
             assert.equal(report.ok, false);
-            assert.equal(report.message, 'Unknown command: unknown-diagnostic-command');
+            assert.equal(report.message, '未知命令：unknown-diagnostic-command');
             assert.deepEqual(report.diagnostics, [
-                { code: 'YZ_TOOL_ERROR', severity: 'error', message: report.message },
+                { code: 'YZ_CLI_ARGUMENT', severity: 'error', message: report.message },
             ]);
             return true;
         },

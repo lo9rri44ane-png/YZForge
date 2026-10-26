@@ -3,6 +3,7 @@ import { resolve, relative, dirname, isAbsolute, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import projectLock from './project-lock.cjs';
 import layout from './layout.cjs';
+import gameConfig from './game-config.cjs';
 export const json = async (path) => JSON.parse(await readFile(path, 'utf8'));
 export const digest = (value) =>
     `sha256:${createHash('sha256')
@@ -114,7 +115,22 @@ export async function writeBatch(root, output, label = 'generate') {
         record.error = error.message;
         await saveTransaction(base, record);
         const conflicts = [];
-        for (const item of [...entries].reverse()) {
+        // Automatic rollback follows the same asset boundary as explicit recovery.
+        // Keep the whole partial transaction when deleting a newly written asset
+        // would require a native reference check; never remove its file behind PinK.
+        for (const item of entries) {
+            try {
+                if (
+                    item.previous === null &&
+                    item.path.startsWith('assets/') &&
+                    (await textOrNull(await safePath(root, item.path))) !== null
+                )
+                    conflicts.push(item.path + ': 需要 PinK 原生引用检查及资源删除');
+            } catch (inspection) {
+                conflicts.push(item.path + ': ' + inspection.message);
+            }
+        }
+        for (const item of conflicts.length ? [] : [...entries].reverse()) {
             try {
                 const target = await safePath(root, item.path),
                     current = await textOrNull(target);
@@ -187,14 +203,23 @@ export async function previewTransaction(root, id) {
         if (current !== item.content) conflicts.push(item.path);
         else changes.push({ path: item.path, action: item.previous === null ? 'delete' : 'restore' });
     }
-    return { id, changes, conflicts, signature: digest({ record, snapshots }) };
+    const nativeRequired = changes
+        .filter((change) => change.action === 'delete' && change.path.startsWith('assets/'))
+        .map((change) => change.path);
+    return { id, changes, conflicts, nativeRequired, signature: digest({ record, snapshots }) };
 }
 /** 恢复前重新校验预览；生成锁在仍存活的其他进程持有时拒绝执行。 */
 export async function recoverTransaction(root, request) {
     return projectLock.withProjectRecovery(root, async () => {
+        await gameConfig.assertUnlocked(root);
         const plan = await previewTransaction(root, request.id);
         if (plan.signature !== request.signature || plan.conflicts.length)
             throw Error('恢复条件变化或存在用户修改，请重新预览');
+        if (plan.nativeRequired.length)
+            throw Object.assign(
+                Error('恢复需要 PinK 原生引用检查及资源删除；未修改文件：' + plan.nativeRequired.join(', ')),
+                { code: 'YZ_PINK_CAPABILITY' },
+            );
         const base = await safePath(root, `.yzforge/changes/${request.id}`),
             record = await json(resolve(base, 'transaction.json'));
         for (const change of [...plan.changes].reverse()) {

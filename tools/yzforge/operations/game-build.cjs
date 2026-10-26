@@ -15,7 +15,7 @@ exports.begin = async function (root, options) {
             throw Error('构建任务引用了旧游戏配置，请重新导出/导入构建参数');
         const generated = JSON.parse(await fs.readFile(path.join(root, config.snapshotPath), 'utf8'));
         if (config.hash(generated) !== config.hash(snapshot))
-            throw Error('游戏配置生成物已过期，请保存 Bootstrap 场景并等待自动生成完成');
+            throw Error('游戏配置生成物已过期，请执行 npm run generate');
         const buildId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
         const lease = {
             root,
@@ -88,8 +88,8 @@ exports.recover = async function (root, isBuilderIdle) {
         const lock = JSON.parse(original);
         if (!Number.isSafeInteger(lock.pid) || lock.pid <= 0 || typeof lock.buildId !== 'string' || !lock.buildId)
             throw Error('构建锁缺少有效进程和任务标识，未修改锁文件');
-        if (isBuilderIdle && (await isBuilderIdle()) !== true)
-            throw Error('Creator 仍有构建任务或状态不可确认，未修改锁文件');
+        if (typeof isBuilderIdle !== 'function' || (await isBuilderIdle()) !== true)
+            throw Error('构建任务状态不可确认，未修改锁文件');
         let alive = true;
         try {
             process.kill(lock.pid, 0);

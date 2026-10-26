@@ -85,7 +85,9 @@ export async function generate(root, input = {}) {
         if (!input.check && !input.preview) await gameConfigTools.assertUnlocked(root);
         const pending = await pendingTransactions(root);
         if (pending.length)
-            throw Error('存在未完成生成，请在工作台预览并恢复：' + pending.map((item) => item.id).join(', '));
+            throw Error(
+                '存在未完成生成，请使用 recovery inspect 检查后恢复：' + pending.map((item) => item.id).join(', '),
+            );
         return generateLocked(root, input);
     });
 }
@@ -367,7 +369,7 @@ async function generateLocked(
         `// 自动生成的项目设置，请通过工作台或源设置文件修改。\nimport type { AppOptions } from '../../../framework/app/app';\n/** App 的音频、日历及清理参数；日历 offsetMinutes 为固定时区分钟偏移，480 表示 UTC+8。 */\nexport const runtimeOptions: Pick<AppOptions, 'appId' | 'cleanupTimeoutMs' | 'maxAudioVoices' | 'audioChannels' | 'time' | 'clockOptions'> = ${JSON.stringify(appOptions, null, 2)};\n`;
     const gameConfig = await gameConfigTools.readConfig(root);
     output[gameConfigTools.outputPath] =
-        `// 自动生成：GameSettings 已保存的选择 + project-settings/game-config.json 渠道参数。\nimport { freezeGameConfig } from '../../../framework/app/game-config';\n/** 当前运行配置；地址与 SDK 参数在运行期间保持不变。 */\nexport const gameConfig = freezeGameConfig(${JSON.stringify(gameConfig, null, 2)});\n`;
+        `// 自动生成：启动选择与渠道参数均来自 project-settings/game-config.json。\nimport { freezeGameConfig } from '../../../framework/app/game-config';\n/** 当前运行配置；地址与 SDK 参数在运行期间保持不变。 */\nexport const gameConfig = freezeGameConfig(${JSON.stringify(gameConfig, null, 2)});\n`;
     output[gameConfigTools.snapshotPath] = JSON.stringify(gameConfig, null, 2) + '\n';
     output[gameConfigTools.channelOptionsPath] = gameConfigTools.channelOptionsSource(
         await gameConfigTools.readSource(root),
@@ -425,7 +427,7 @@ async function generateLocked(
     if (check && validationErrors.length) throw validationError(validationErrors.join('\n'), diagnostics);
     if (check && (differences.length || obsolete.length))
         throw validationError(
-            `Generated output is stale; use the workbench or npm run generate:\n${differences.join('\n')}\nObsolete files: ${obsolete.join(', ')}`,
+            `Generated output is stale; run npm run generate:\n${differences.join('\n')}\nObsolete files: ${obsolete.join(', ')}`,
             [
                 ...differences.map((file) =>
                     diagnostic('YZ_GENERATED_STALE', `生成产物与源声明不一致：${file}`, {
@@ -439,7 +441,7 @@ async function generateLocked(
         );
     if (!check && !preview && obsolete.length && !allowObsolete)
         throw validationError(
-            `Use the Creator workbench to inspect references and archive obsolete generated assets:\n${obsolete.join('\n')}`,
+            `Obsolete generated assets require native reference inspection and archival; the PinK cleanup adapter is not yet available:\n${obsolete.join('\n')}`,
             obsoleteDiagnostics,
         );
     const plannedOutput = {

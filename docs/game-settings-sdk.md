@@ -1,6 +1,6 @@
 # 游戏设置与 SDK 接入
 
-打开 `assets/game/boot/Bootstrap.scene`，选择 `GameRoot`。`GameSettings` 使用原生 Inspector，只展示四项选择：
+启动选择和渠道参数统一保存在 `project-settings/game-config.json`。在 PinK 终端使用 `npm run yz -- config show` 查询，使用 `config set` 修改以下选择：
 
 | 选项     | 用途                                                |
 | -------- | --------------------------------------------------- |
@@ -9,22 +9,22 @@
 | 构建模式 | Debug / Release，控制 Creator Debug、日志和性能统计 |
 | 服务环境 | Dev / Staging / Prod，选择服务地址和 SDK 参数       |
 
-支持 **Debug + Prod** 和 **Release + Staging**。修改后按 **Ctrl+S 保存场景**，编辑器自动生成配置，等待导入完成后重新启动预览。这里没有额外的保存、生成或构建按钮。
+支持 **Debug + Prod** 和 **Release + Staging**。修改后执行 `npm run generate`、`npm run check`，等待 PinK 导入脚本后重新启动预览。持续生成可用 `npm run yz -- watch`；它不代替引擎导入完成检查。
 
 ## 配置归属
 
-- 四项选择只保存在 `Bootstrap/GameRoot/GameSettings`；JSON 中没有 `selection`。
-- 渠道参数只保存在 [`project-settings/game-config.json`](../project-settings/game-config.json)。可从菜单 **YZForge → 游戏设置 → 打开渠道参数 JSON** 打开。
+- 四项选择保存在 [`project-settings/game-config.json`](../project-settings/game-config.json) 的 `selection`，格式版本为 3。
+- 渠道参数保存在同一 JSON 的 `channels`，不从场景选择字段读取或迁移。
 - `assets/game/app/generated/game-config.ts` 和 `project-settings/generated/game-config.json` 是自动生成的本次运行配置，不手动修改。
-- `assets/game/app/generated/channel-options.ts` 是自动生成的下拉列表，只包含渠道 ID 和名称。
+- `GameSettings` 只返回生成的运行配置，不再保存选择字段或依赖编辑器注入。
 
-组件保存字符串 `channelId`，下拉框的数字序号不序列化。因此增删、重排渠道或修改显示名称，不会把已选渠道变成另一个渠道。删除当前渠道后，重新选择有效渠道并保存；不会自动回退到第一项。
+`selection.channel` 使用稳定渠道 ID。删除当前渠道后，必须选择有效渠道；不会自动回退到第一项。
 
-JSON 保存后自动更新下拉列表和运行配置。JSON 不合法时，生成器报错；预览会核对源配置摘要，拒绝使用过期配置启动。构建同样核对保存的场景、配置快照和真实构建选项。四项选择尚未保存或脚本尚未导入完成时，应保存并等待后再预览/构建。
+JSON 不合法或运行配置过期时，命令检查失败。PinK 自身的预览按钮目前没有接入框架生成检查；启动前必须执行上述命令，不能依靠预览启动成功证明配置最新。
 
 ## 新增渠道和修改参数
 
-**同一 SDK 增加发行渠道**：复制 `channels` 中一条完整记录，使用新的稳定 ID，例如 `wechat_partner_b`，修改 `name`、`platformAppId`、广告位和环境参数。`integration` 复用相同接入实现，保存 JSON 后下拉框自动出现新渠道。
+**同一 SDK 增加发行渠道**：复制 `channels` 中一条完整记录，使用新的稳定 ID，例如 `wechat_partner_b`，修改 `name`、`platformAppId`、广告位和环境参数。`integration` 复用相同接入实现，再通过 `config set --channel wechat_partner_b` 选择。
 
 **接入新发行 SDK**：实现 `SdkIntegrationFactory`，在 [`assets/game/app/sdk-integrations.ts`](../assets/game/app/sdk-integrations.ts) 的 `sdkIntegrations` 中登记，例如 `partner: createPartnerIntegration`，再将渠道的 `integration` 设为 `partner`。
 
@@ -118,21 +118,18 @@ ctx.sdk.lifecycle.onShow((launch) => ctx.log.debug('回到前台', launch.scene)
 
 ## 构建与预览模拟
 
-1. 修改 GameSettings 并 Ctrl+S 保存场景，等待自动生成和脚本导入。
-2. 菜单 **YZForge → 游戏设置 → 导出构建参数**，文件位于 `.yzforge/build-configs/<渠道>-<环境>-<模式>.json`。
-3. Creator 构建面板导入该文件并构建，也可将文件交给 Creator 命令行 `configPath`。
+先生成并检查配置，再通过统一命令导出构建参数。结果的 `options` 是引擎构建输入，`configHash` 标识本次配置；导出本身不会启动构建。
 
 ```sh
-npm run game:config -- show
-npm run game:config -- build-options
-npm run game:config -- build-options --platform web-desktop
+npm run yz -- config show
+npm run yz -- config set --channel web_local --mode release --environment staging
+npm run generate
+npm run yz -- config build-options --platform web-mobile
 ```
 
-命令行读取已保存场景，不直接改写 `.scene`。切换配置后重新导出构建参数；旧任务摘要、错误平台、Debug 或 AppID 不匹配都会报错。构建期间配置被冻结，结束时再次校验；产物包含 `yzforge-build.json`，`.yzforge/build-reports` 保存独立记录。
+命令读取启动场景的已有 UUID，不改写场景或元数据。切换配置后重新导出；错误平台、Debug 或 AppID 不匹配会报错。PinK 独立构建验收命令见 [PinK 工作流](pink-workflow.md)，在副本中冻结配置并核验构建前后的一致性。当前 PinK 主项目的原生预览/构建按钮尚未接入这套检查，不能把旧 Creator 构建钩子的行为当作 PinK 保证。
 
-构建期间保存的新配置会排队，锁释放后自动生成，无需再次保存。若本次构建的配置因此发生变化，一致性检查仍会拒绝该产物，需使用新配置重新构建。
-
-编辑器崩溃或重启后若残留构建锁，使用 **YZForge → 游戏设置 → 恢复中断的构建**。恢复会核对 Creator 已空闲、原进程已退出、锁内容未变化，再释放锁并生成配置；不会移除活动进程的锁。命令行可运行 `npm run game:config -- recover-build`，同样检查原进程已退出并与生成/构建互斥。
+配置修改、创建和生成遵守构建锁。恢复中断构建必须同时证明真实构建任务已结束和原进程退出；现有 CLI 不提供仅凭 PID 强制解锁的入口。
 
 显式设置 `preview.mockSdk: true` 后重新预览，可模拟整套 SDK，真实发行和广告 SDK 不初始化。`sdk.simulation.nextAd` 支持 `completed` / `skipped` / `error`，默认 `skipped`；`failNextLogin` 模拟一次登录失败。模拟结果始终带 `simulated: true`，构建禁止开启模拟。Debug 模式本身不启用模拟。
 
@@ -144,6 +141,6 @@ npm run game:config -- build-options --platform web-desktop
 
 ## 验证
 
-`npm run verify` 包含 SDK 组合、登录结果、取消/超时、异步广告销毁、配置解析、场景选择和构建一致性检查。真实微信、抖音、第三方 SDK 接入仍需开发者工具或真机、真实 AppID 和广告位联调。
+`npm run verify` 包含 SDK 组合、登录结果、取消/超时、异步广告销毁、JSON 配置解析和构建一致性检查。真实微信、抖音、第三方 SDK 接入仍需开发者工具或真机、真实 AppID 和广告位联调。
 
-构建 `web_local-prod-debug` 与 `web_local-staging-release` 后，运行 `node tests/integration/serve-build.mjs build`，再用 `node tests/integration/verify-game-settings.mjs <本机 URL>` 检查构建配置和默认共用存档。该检查使用独立临时浏览器存储，并清理自己的测试键。
+旧 Creator 的 `verify-game-settings.mjs` 记录历史验证方式，不作为本轮 PinK 验收入口。

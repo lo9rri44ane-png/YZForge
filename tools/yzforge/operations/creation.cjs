@@ -90,7 +90,7 @@ exports.createCreationTracker = function (ctx) {
                 record.error = error.message;
                 await save(record);
                 throw Error(
-                    `${error.message}\n创建记录 ${record.id} 已保留，可在“删除与恢复”检查残留并清理本次创建。`,
+                    `${error.message}\n创建记录 ${record.id} 已保留，使用 recovery creation-inspect 检查残留。`,
                     {
                         cause: error,
                     },
@@ -184,6 +184,7 @@ exports.createCreationTracker = function (ctx) {
     }
     async function cleanup(args) {
         return withProjectRecovery(inside('.'), async () => {
+            await ctx.beforeApply?.();
             const preview = await inspect(args.id);
             if (preview.signature !== args.signature) throw Error('清理条件已变化，请重新检查');
             if (preview.conflicts.length || preview.references.length)

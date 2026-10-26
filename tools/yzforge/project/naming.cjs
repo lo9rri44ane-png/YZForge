@@ -9,6 +9,7 @@ const suffixes = Object.freeze({
     prefab: 'Prefab',
     component: 'Component',
     service: 'Service',
+    viewmodel: 'ViewModel',
 });
 function slug(input) {
     const id = String(input ?? '')

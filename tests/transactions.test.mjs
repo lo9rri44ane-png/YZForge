@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import {
     writeBatch,
     pendingTransactions,
@@ -53,4 +55,58 @@ test('generation recovery restores only its own outputs and refuses changed prev
     } finally {
         await rm(root, { recursive: true, force: true });
     }
+});
+
+test('写入后响应丢失时自动回滚也保留新资产及整笔事务', async (t) => {
+    const root = await mkdtemp(join(tmpdir(), 'yzforge-auto-rollback-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    await writeFile(join(root, 'config.json'), 'old');
+    const nativeRename = fs.rename;
+    t.mock.method(fs, 'rename', async (from, to) => {
+        await nativeRename(from, to);
+        if (to === join(root, 'assets/generated.ts')) throw Error('lost write response');
+    });
+    syncBuiltinESMExports();
+    t.after(() => {
+        t.mock.restoreAll();
+        syncBuiltinESMExports();
+    });
+    await assert.rejects(
+        writeBatch(root, { 'config.json': 'new', 'assets/generated.ts': 'generated' }),
+        /lost write response/,
+    );
+    assert.equal(await readFile(join(root, 'config.json'), 'utf8'), 'new');
+    assert.equal(await readFile(join(root, 'assets/generated.ts'), 'utf8'), 'generated');
+    const [pending] = await pendingTransactions(root);
+    assert.equal(pending.status, 'interrupted');
+    assert.deepEqual((await previewTransaction(root, pending.id)).nativeRequired, ['assets/generated.ts']);
+});
+
+test('生成恢复涉及资源删除时在任何回滚前拒绝，保留文件和事务', async (t) => {
+    const root = await mkdtemp(join(tmpdir(), 'yzforge-native-recovery-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const id = '1790000000000-abcd',
+        base = join(root, '.yzforge/changes', id);
+    await mkdir(base, { recursive: true });
+    await mkdir(join(root, 'assets'));
+    await writeFile(join(root, 'assets/generated.ts'), 'new asset');
+    await writeFile(join(root, 'config.json'), 'new config');
+    await writeFile(
+        join(base, 'transaction.json'),
+        JSON.stringify({
+            formatVersion: 2,
+            id,
+            status: 'interrupted',
+            entries: [
+                { path: 'assets/generated.ts', previous: null, content: 'new asset' },
+                { path: 'config.json', previous: 'old config', content: 'new config' },
+            ],
+        }),
+    );
+    const preview = await previewTransaction(root, id);
+    assert.deepEqual(preview.nativeRequired, ['assets/generated.ts']);
+    await assert.rejects(recoverTransaction(root, preview), { code: 'YZ_PINK_CAPABILITY' });
+    assert.equal(await readFile(join(root, 'config.json'), 'utf8'), 'new config');
+    assert.equal(await readFile(join(root, 'assets/generated.ts'), 'utf8'), 'new asset');
+    assert.equal((await pendingTransactions(root)).length, 1);
 });

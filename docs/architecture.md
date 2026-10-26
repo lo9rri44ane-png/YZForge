@@ -1,5 +1,7 @@
 # 目录与依赖规则
 
+当前命令入口与 PinK 适配范围见 [PinK 工作流](pink-workflow.md)。源码操作复用本章的规划和事务实现；下面涉及 Creator 适配器的段落说明旧实现，不能据此在 PinK 工作流中调用 Creator MCP。
+
 目录由运行职责、代码交付边界和文件所有权决定。模块采用 `layoutVersion: 3`，生成器、工作台、绑定和恢复共用 `tools/yzforge/project/layout.cjs`；源声明不填写可从规则推导的路径。
 
 ## 框架运行时

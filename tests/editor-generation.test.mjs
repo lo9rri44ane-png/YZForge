@@ -182,12 +182,18 @@ test('使用方错误仍在刷新生成资产后抛出，创建成功后生成�
             throw generationError;
         },
         (_file, args, _options, callback) => {
-            assert.ok(args.includes('--editor'));
-            const result =
-                args[1] === 'preview'
-                    ? { ok: true, obsolete: [], outputPaths: [] }
-                    : { ok: false, valid: false, validationErrors: ['bad type'], diagnostics, obsolete: [] };
-            callback(null, JSON.stringify(result), '');
+            assert.equal(args.includes('--editor'), false);
+            const result = args.includes('--dry-run')
+                ? { ok: true, obsolete: [], outputPaths: [] }
+                : {
+                      ok: false,
+                      status: 'applied-needs-fix',
+                      valid: false,
+                      validationErrors: ['bad type'],
+                      diagnostics,
+                      obsolete: [],
+                  };
+            callback(result.ok ? null : Error('consumer diagnostics'), JSON.stringify(result), '');
         },
     );
     try {
