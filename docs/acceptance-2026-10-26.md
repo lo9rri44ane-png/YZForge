@@ -77,4 +77,31 @@
 | 空项目截图                      | 副本的 `temp/mcp-captures/catalog-trial-page.png`、`catalog-trial-detail.png`        |
 | 主工程最终检查                  | `.yzforge/verify-134-final.log`                                                      |
 
-复现集成、性能和构建审计命令见 [实现范围与验证](implementation-status.md)。本次没有运行托管 CI 的跨系统矩阵，也没有微信、抖音、Android/iOS 发布包或真机验收；真实 SDK、移动端音频权限、后台恢复、下载缓存和设备性能仍需在对应环境验证。
+复现集成、性能和构建审计命令见 [实现范围与验证](implementation-status.md)。上述阶段没有运行托管 CI 的跨系统矩阵，也没有微信、抖音、Android/iOS 发布包或真机验收。后续微信验证记录如下。
+
+## 复审后的 Release 与微信验收
+
+基于 `402ad12` 重建 Web Release，包含列表方向切换时原子提交新布局、视口和偏移的修复，避免仍可见条目的绑定被短暂取消。再次通过 6 项 UI/列表集成脚本、构建冒烟及按需代码加载检查。输出共 122 个文件、4,332,725 字节，体积审计通过。
+
+相同桌面环境的性能复测中，页面打开 p95 为 63.8 ms，纵向/横向/变高滚动帧间隔 p95 为 16.7/16.8/16.8 ms；与同配置基线比较通过。这些是 Windows 桌面 Web Release 数据，不代表手机性能。
+
+微信构建使用独立副本的 `wechat_self / dev / release` 配置及用户提供的测试 AppID，主工程渠道配置未修改。Creator 3.8.8 构建成功，实际分包审计通过；产物 3,803,147 字节。微信开发者工具 Stable 2.02.2608070、基础库 3.17.4 中，首页正常启动，控制台没有运行错误；观察到万条纵向列表使用 11 个实例，网格使用 39 个实例。首次启动有引擎缓存索引文件不存在的提示，后续页面正常显示。
+
+微信工具已完成预览打包并生成二维码，工具显示代码包 3704 KB。用户扫码后反馈“没问题”，对应本轮询问的首页进入、横向/变高列表滚动及定位第 5000 项、切后台约 10 秒后恢复操作。该结果属于用户反馈的真机冒烟；设备型号、系统版本和性能数据未记录。音频权限/中断恢复、下载缓存命中与清除、广告/登录等 SDK 专项尚未完成验收。
+
+空项目开发流程已整理为可重复执行的脚本。它使用专用副本标记和项目身份校验，拒绝在源工程或已使用的副本运行；失败保留现场与阶段记录。实际流程通过工作台删除五个示例模块、验证空启动，再创建目录模块、120 行表、Service、Page、Popup 和 Part，并通过 Creator 绑定及真实预览交互。完整检查包含 369 项框架/工具测试；资源持有、配置持有和任务在关闭后清空。复现入口见 [复制项目](copy-project.md#验证副本)。
+
+复跑暴露了新建模块时资源包保存后立即读回不匹配的问题：失败现场稍后的 AssetDB 元数据与磁盘内容均符合预期。保存校验改为最多等待 5 秒，确认两处的全部属性与 UUID 一致后记录实际字节；对象键序和排版不影响判断。整个过程只写一次，身份改变立即失败，超时保留创建记录。回归覆盖缓存/磁盘先后更新、键序变化、身份改变及超时后不认领外部修改。
+
+| 本轮证据              | 本机路径（相对项目根目录，不随 Git 分发）                                           |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| 最新 Web 构建日志     | `.yzforge/trials/2026-10-26-release/build4.stdout.log`                              |
+| 6 项 Web Release 集成 | `.yzforge/verification/2026-10-26T06-56-10.120Z-integration-85036fbc/report.json`   |
+| Web 构建冒烟          | `.yzforge/release-latest-smoke.log`                                                 |
+| Web Release 性能复测  | `.yzforge/performance/creator-runtime-1792997994452-36e339de.json`                  |
+| 微信构建日志          | `.yzforge/trials/2026-10-26-release/wechat-build.stdout.log`                        |
+| 微信分包/体积审计     | `.yzforge/trials/2026-10-26-release/project/.yzforge/build-reports/wechatgame.json` |
+| 空项目自动验收        | `.yzforge/trials/empty-hOnxB1/project/.yzforge/empty-project-report.json`           |
+| 主工程完整检查        | `.yzforge/verify-followup.log`                                                      |
+
+GitHub Actions 邮件所涉及的 CI 问题按用户要求未处理。抖音、Android/iOS 发布包与真机、跨系统工具链矩阵不在本轮已验证范围内。

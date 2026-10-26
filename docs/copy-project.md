@@ -105,6 +105,24 @@ export function startGame(_app: App, _boot: BootContext): void {}
 
 ## 验证副本
 
+要重复验证“清空示例 → 从零创建业务 → 实际交互”的开发流程，先在框架根目录执行：
+
+```powershell
+node tests/integration/create-empty-trial.mjs
+```
+
+它在 `.yzforge/trials/empty-随机值/project` 创建全新的独立项目，保留资产 UUID，分配新的项目 UUID 和框架 appId，并记录源提交和工作区是否有修改。它复制 Git 跟踪文件及未忽略的新源文件，不复制 `temp`、`library`、依赖或本机 MCP 配置。
+
+进入输出的副本目录运行 `npm ci`，用 Creator 3.8.8 打开该副本并等待首次导入完成。在 Funplay MCP 面板确认此副本的实际本地端口，保存该副本的 `funplay-cocos-mcp.config.json`（`host` 和 `port`）；不要沿用源工程的端口。然后在副本运行：
+
+```powershell
+node tests/integration/verify-empty-project.mjs
+```
+
+验收脚本先核对专用副本标记、项目 UUID、MCP 项目身份及初始模块清单，然后通过工作台删除示例、验证空启动，创建 `catalog` 模块、120 行配置表、Service、Page、Popup 和 Part。界面由 Creator 序列化，通过工作台绑定并读回根节点身份；最后执行与 `npm run verify` 相同的检查及真实预览交互，覆盖首尾条目、弹窗输入阻挡、三种视口和关闭清理。
+
+主工程或无标记副本会被拒绝；运行过的副本不能重复执行整套创建流程，重跑请创建新副本。失败保留现场与阶段记录，不自动删除目录或覆盖后续修改。报告在副本 `.yzforge/empty-project-report.json`，检查日志在 `.yzforge/verification/`，截图在 `temp/mcp-captures/`。该流程验证 Creator 预览；发布包仍按下面的流程单独验收。
+
 以下命令在**副本根目录**运行，MCP 必须连接该副本的 Creator。先按 [游戏设置与 SDK](game-settings-sdk.md#构建与预览模拟) 构建 Web 产物，再启动静态服务并使用 `verify-template.mjs` 检查启动、空装配、应用标识和关闭清理。脚本创建的测试窗口结束时销毁，静态服务使用完后手动停止；其他入口见 [实现范围与验证](implementation-status.md)。
 
 ```powershell

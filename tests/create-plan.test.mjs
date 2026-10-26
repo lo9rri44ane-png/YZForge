@@ -50,6 +50,8 @@ async function fixture(t) {
                 await writeFile(target + '.meta', JSON.stringify({ uuid: 'created-' + ++serial }));
             return request(_service, 'query-asset-info', url);
         }
+        if (method === 'query-asset-meta') return JSON.parse(await readFile(target + '.meta', 'utf8'));
+        if (method === 'save-asset-meta') return writeFile(target + '.meta', content);
         throw Error(method);
     };
     const ctx = {
@@ -60,6 +62,7 @@ async function fixture(t) {
         request,
         designResolution: async () => ({ width: 720, height: 1280 }),
         assertBindingSceneSaved: async () => {},
+        bundleMetadata: (meta, id) => ({ ...meta, userData: { ...meta.userData, isBundle: true, bundleName: id } }),
     };
     ctx.creation = historyTools.createCreationTracker(ctx);
     return { root, ctx, put };
@@ -119,6 +122,83 @@ test('各种交付模式均在源文件和原生绑定步骤之后最后登记�
         assert.ok(plan.steps.some((step) => step.path?.endsWith('/public.ts')));
         if (delivery === 'bundled') assert.ok(plan.steps.some((step) => step.kind === 'scene'));
     }
+});
+
+test('资源包保存等待缓存与磁盘一致，忽略键序但仅写入一次', async (t) => {
+    const { ctx } = await fixture(t);
+    const request = ctx.request;
+    let pending,
+        reads = 0,
+        writes = 0;
+    ctx.request = async (service, method, url, content) => {
+        if (method === 'save-asset-meta') {
+            writes++;
+            pending = { url, content, before: await request(service, 'query-asset-meta', url) };
+            return;
+        }
+        if (method === 'query-asset-meta' && pending) {
+            reads++;
+            if (reads === 1) return pending.before;
+            const value = JSON.parse(pending.content);
+            // 第二次查询缓存已更新，磁盘仍旧；第三次两处才一致，且排版和键序改变。
+            const reordered = { userData: { bundleName: value.userData.bundleName, isBundle: true }, uuid: value.uuid };
+            if (reads >= 3) await request(service, 'save-asset-meta', url, JSON.stringify(reordered, null, 4) + '\n');
+            return reordered;
+        }
+        return request(service, method, url, content);
+    };
+    const plan = await planning.planCreation(ctx, { kind: 'module', id: 'fresh', delivery: 'eager' });
+    await execution.executeCreation(ctx, plan);
+    assert.equal(writes, 1);
+    assert.equal(reads, 3);
+    assert.deepEqual(await ctx.creation.list(), []);
+    const meta = JSON.parse(await readFile(ctx.inside('assets/game/modules/fresh/bundles/default.meta'), 'utf8'));
+    assert.equal(meta.uuid, pending.before.uuid);
+    assert.equal(meta.userData.bundleName, 'm-fresh');
+});
+
+test('资源包读回身份改变立即失败，保留创建记录且不重写', async (t) => {
+    const { ctx } = await fixture(t);
+    const request = ctx.request;
+    let saved = false,
+        writes = 0;
+    ctx.request = async (service, method, url, content) => {
+        if (method === 'save-asset-meta') {
+            saved = true;
+            writes++;
+        }
+        const result = await request(service, method, url, content);
+        return method === 'query-asset-meta' && saved ? { ...result, uuid: 'changed-by-another-operation' } : result;
+    };
+    const plan = await planning.planCreation(ctx, { kind: 'module', id: 'fresh', delivery: 'eager' });
+    await assert.rejects(execution.executeCreation(ctx, plan), /资源包身份/);
+    assert.equal(writes, 1);
+    const [record] = await ctx.creation.list();
+    assert.equal(record.stage, 'failed');
+    await assert.rejects(stat(ctx.inside('assets/game/modules/fresh/module.json')), { code: 'ENOENT' });
+});
+
+test('资源包属性持续不一致会超时失败，不覆盖后来写入的值', async (t) => {
+    const { ctx } = await fixture(t);
+    const request = ctx.request;
+    let writes = 0;
+    ctx.request = async (service, method, url, content) => {
+        if (method === 'save-asset-meta') {
+            writes++;
+            const value = JSON.parse(content);
+            value.userData.bundleName = 'changed-after-save';
+            return request(service, method, url, JSON.stringify(value));
+        }
+        return request(service, method, url, content);
+    };
+    const plan = await planning.planCreation(ctx, { kind: 'module', id: 'fresh', delivery: 'eager' });
+    await assert.rejects(execution.executeCreation(ctx, plan), /5 秒内读回仍不一致/);
+    assert.equal(writes, 1);
+    const meta = JSON.parse(await readFile(ctx.inside('assets/game/modules/fresh/bundles/default.meta'), 'utf8'));
+    assert.equal(meta.userData.bundleName, 'changed-after-save');
+    const [record] = await ctx.creation.list();
+    const cleanup = await ctx.creation.previewCleanup({ id: record.id });
+    assert.ok(cleanup.conflicts.length, '恢复流程不得认领与预期不符的修改');
 });
 
 test('清理写回后进程直接退出，重启可接管失效锁并完成记录', async (t) => {
