@@ -98,7 +98,7 @@ export class VirtualList extends Component {
 
     /**
      * 装配业务 Part 工厂并建立列表会话，之后通过返回的 handle 传入数据。
-     * @param options 本次所有者、资源入口、业务条目与固定布局。
+     * @param options 本次所有者、资源入口、业务条目与布局。
      * @returns 仅属于本次挂载的类型化入口，不能跨页面展示复用。
      * @throws VIRTUAL_LIST_SETUP 结构、布局所有权或尺寸非法；VIRTUAL_LIST_MOUNTED 旧会话尚未清理。
      * @throws BINDING_PROPERTY_OWNED Content 已由其他受管组合持有，包括空列表及清理中的组合。
@@ -275,7 +275,7 @@ export class VirtualList extends Component {
                     const candidate = new VirtualLayout(layout);
                     checkCrossSize(candidate);
                     const reset = candidate.horizontal !== controller.layout.horizontal;
-                    controller.setLayout(layout);
+                    controller.setLayout(layout, candidate.horizontal ? view.width : view.height);
                     sync(reset);
                 },
                 scrollToIndex: (index: number, alignment: VirtualListAlignment = 'start', durationSeconds = 0) => {

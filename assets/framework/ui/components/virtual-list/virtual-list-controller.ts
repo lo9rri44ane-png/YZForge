@@ -99,9 +99,14 @@ export class VirtualListController<T, Item> {
         this.keys = keys;
         this.updateRequests();
     }
-    setLayout(layout: VirtualListLayout<T>): void {
+    setLayout(layout: VirtualListLayout<T>, viewport = this.viewport): void {
         this.scope.signal.throwIfAborted();
-        this.layout = new VirtualLayout(layout, this.data);
+        invariant(Number.isFinite(viewport) && viewport >= 0, 'VIRTUAL_LIST_VIEWPORT', '视口长度必须为有效数值');
+        const next = new VirtualLayout(layout, this.data);
+        // 先提交完整几何再调度；不能按旧方向的偏移/视口误取消仍可见的身份绑定。
+        if (next.horizontal !== this.layout.horizontal) this.offset = 0;
+        this.layout = next;
+        this.viewport = viewport;
         this.updateRequests();
     }
     setViewport(size: number, offset: number): void {

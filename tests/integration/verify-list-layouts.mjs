@@ -3,7 +3,7 @@ import { isolatedRuntime } from './isolated-runtime.mjs';
 
 await isolatedRuntime(process.argv[2], 'list-layouts', async ({ run, click, drag, resize, capture }) => {
     await run(
-        `const owner=app.flows.child('list-layouts');const handle=await app.ui.pushPage({id:'showcase.virtual-list-lab-page',kind:'page'},undefined,owner);const record=Array.from(app.ui.records.values()).find(r=>r.handle===handle);globalThis.__listLayoutTest={owner,handle,view:record.instance.view};return true;`,
+        `const owner=app.flows.child('list-layouts'),bindings=new Map(),prototype=cc.js.getClassByName('showcase.VirtualListItemPart').prototype,originalBind=prototype.bind;prototype.bind=function(item){bindings.set(item.key,item);return originalBind.call(this,item);};const handle=await app.ui.pushPage({id:'showcase.virtual-list-lab-page',kind:'page'},undefined,owner);const record=Array.from(app.ui.records.values()).find(r=>r.handle===handle);globalThis.__listLayoutTest={owner,handle,view:record.instance.view,bindings,prototype,originalBind};return true;`,
     );
     const check = (code) =>
         run(
@@ -21,7 +21,13 @@ await isolatedRuntime(process.argv[2], 'list-layouts', async ({ run, click, drag
         `check(scroll.getScrollOffset().x<0,'Real horizontal drag failed');scroll.stopAutoScroll();return true;`,
     );
     console.log(await capture('virtual-list-horizontal.png'));
+    await check(
+        `list.scrollToIndex(1);await list.ready;const test=globalThis.__listLayoutTest;test.survivors=[2,3].map(key=>test.bindings.get(key));check(test.survivors.every(item=>item&&!item.signal.aborted),'Missing axis-switch fixture');return true;`,
+    );
     await mode();
+    await check(
+        `const test=globalThis.__listLayoutTest;check(test.survivors.every(item=>!item.signal.aborted&&test.bindings.get(item.key)===item),'Axis switch cancelled a still-visible binding');return true;`,
+    );
     const variable = await check(
         `check(!scroll.horizontal&&scroll.vertical,'Vertical axis not restored');check(Math.abs(scroll.getScrollOffset().x)<1&&Math.abs(scroll.getScrollOffset().y)<1,'Axis change retained old offset');list.scrollToIndex(4999,'center');await list.ready;check(list.inspect().indices.includes(4999),'Variable jump missing target');const cells=scroll.content.children.filter(n=>n.active).sort((a,b)=>b.position.y-a.position.y);const heights=cells.map(n=>n.getComponent(cc.UITransform).height);check(new Set(heights).size>1,'Variable row heights missing');for(let i=1;i<cells.length;i++){const a=cells[i-1],b=cells[i],at=a.getComponent(cc.UITransform),bt=b.getComponent(cc.UITransform);const bottom=a.position.y-at.height*at.anchorY,top=b.position.y+bt.height*(1-bt.anchorY);check(Math.abs(bottom-top-8)<0.01,'Rows overlap or have wrong spacing');}return {state:list.inspect(),heights};`,
     );
@@ -56,7 +62,7 @@ await isolatedRuntime(process.argv[2], 'list-layouts', async ({ run, click, drag
     await click('globalThis.__listLayoutTest.view.btnData.node');
     await check(`check(list.count===10000,'Variable list failed to repopulate');return true;`);
     const closed = await run(
-        `try{await globalThis.__listLayoutTest.owner.close();await app.close();return app.inspect();}catch(error){throw Error(JSON.stringify(error,(_key,value)=>value instanceof Error?{message:value.message,code:value.code,details:value.details,cause:value.cause}:value));}`,
+        `try{await globalThis.__listLayoutTest.owner.close();await app.close();return app.inspect();}catch(error){throw Error(JSON.stringify(error,(_key,value)=>value instanceof Error?{message:value.message,code:value.code,details:value.details,cause:value.cause}:value));}finally{const test=globalThis.__listLayoutTest;test.prototype.bind=test.originalBind;}`,
     );
     assert.equal(closed.scope.state, 'closed');
     assert.deepEqual(closed.modules, []);

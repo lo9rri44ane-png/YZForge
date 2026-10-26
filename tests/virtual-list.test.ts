@@ -356,6 +356,36 @@ test('变高数据更新原子校验并保留相同 Key 的绑定，清空后可
     await f.owner.close();
 });
 
+test('方向切换一次性应用新视口和起点，最终仍可见的 Key 不经历临时窗口取消', async () => {
+    const f = fixture();
+    try {
+        f.list.setLayout({ axis: 'horizontal', itemWidth: 320, itemHeight: 20, overscanRows: 0 });
+        f.list.setItems(data(100));
+        f.list.setViewport(640, 320);
+        await f.list.ready();
+        const original = f.renders.slice();
+        assert.deepEqual(
+            original.map(({ item }) => item.key),
+            [1, 2],
+        );
+        f.list.setLayout({ itemWidth: 100, itemHeight: 20, overscanRows: 0 }, 80);
+        assert.ok(original.every(({ item }) => !item.signal.aborted));
+        await f.list.ready();
+        assert.deepEqual(f.list.inspect().indices, [0, 1, 2, 3]);
+        for (const binding of original)
+            assert.deepEqual(
+                f.renders.filter(({ item }) => item.key === binding.item.key),
+                [binding],
+            );
+        const layout = f.list.layout;
+        assert.throws(() => f.list.setLayout(layout.options, -1), { code: 'VIRTUAL_LIST_VIEWPORT' });
+        assert.equal(f.list.layout, layout);
+        assert.deepEqual(f.list.inspect().indices, [0, 1, 2, 3]);
+    } finally {
+        await f.owner.close();
+    }
+});
+
 test('十万条数据只创建窗口实例，长距离跳转复用节点且不重绑仍可见项', async () => {
     const f = fixture();
     f.list.setViewport(60, 0);
