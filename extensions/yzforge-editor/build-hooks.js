@@ -35,6 +35,9 @@ exports.onBeforeBuild = async function (options) {
             ),
         );
         // TS 编译通过并不代表 Creator 已完成脚本导入；缺类的 Prefab 可能被序列化为 null 组件。
+        // CLI 不启动编辑器脚本运行时，不能用编辑场景的类注册表判断构建脚本是否有效。
+        // 两种入口均执行上面的源契约/TS 检查及 Creator 编译；构建产物仍须进行运行时验收。
+        if (Object.hasOwn(Editor.App.args, 'build')) return;
         const fs = require('fs/promises');
         const moduleRoot = path.join(Editor.Project.path, 'assets/game/modules');
         for (const entry of await fs.readdir(moduleRoot, { withFileTypes: true })) {

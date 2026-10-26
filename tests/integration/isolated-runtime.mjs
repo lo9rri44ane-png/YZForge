@@ -30,17 +30,39 @@ try{await w.loadURL(args.url);return w.id;}catch(error){w.destroy();throw error;
         if (!result.ok) throw Error(result.stack ?? result.message);
         return result.value;
     };
-    const click = async (nodeExpression) => {
-        const position = await run(`
+    const positionOf = (nodeExpression) =>
+        run(`
 await new Promise(resolve=>cc.director.once(cc.Director.EVENT_AFTER_DRAW,resolve));
 const node=(${nodeExpression});if(!cc.isValid(node,true))throw Error('Click target missing');
 const camera=cc.director.getScene().getComponentsInChildren(cc.Camera).find(c=>(c.visibility&node.layer)!==0);
 if(!camera)throw Error('UI camera missing');const p=camera.worldToScreen(node.worldPosition),canvas=cc.game.canvas,rect=canvas.getBoundingClientRect();
 return {x:Math.round(rect.left+p.x/canvas.width*rect.width),y:Math.round(rect.top+(1-p.y/canvas.height)*rect.height)};`);
+    const click = async (nodeExpression) => {
+        const position = await positionOf(nodeExpression);
         await editor(
             target +
                 `for(const type of ['mouseMove','mouseDown','mouseUp'])w.webContents.sendInputEvent({type,button:'left',clickCount:1,...args.position});await new Promise(resolve=>setTimeout(resolve,80));return true;`,
             { id, name, position },
+        );
+    };
+    const drag = async (nodeExpression, delta) => {
+        const position = await positionOf(nodeExpression);
+        await editor(
+            target +
+                `const start=args.position;w.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...start});for(let i=1;i<=8;i++){w.webContents.sendInputEvent({type:'mouseMove',button:'left',x:Math.round(start.x+args.delta.x*i/8),y:Math.round(start.y+args.delta.y*i/8)});await new Promise(resolve=>setTimeout(resolve,16));}w.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:Math.round(start.x+args.delta.x),y:Math.round(start.y+args.delta.y)});return true;`,
+            { id, name, position, delta },
+        );
+    };
+    const resize = async (width, height) => {
+        assert.ok(Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0);
+        await editor(
+            target +
+                `w.setContentSize(args.width,args.height);await new Promise(resolve=>setTimeout(resolve,250));return true;`,
+            { id, name, width, height },
+        );
+        await run(
+            `cc.screen.windowSize=new cc.Size(args.width,args.height);await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return true;`,
+            { width, height },
         );
     };
     const capture = async (fileName) => {
@@ -55,7 +77,14 @@ return {x:Math.round(rect.left+p.x/canvas.width*rect.width),y:Math.round(rect.to
         let ready = false;
         const deadline = Date.now() + 25000;
         while (Date.now() < deadline) {
-            ready = await run('return !!app?.ui.inspect().views.some(view=>view.interactive);').catch(() => false);
+            const mapped = await editor(
+                target +
+                    `return w.webContents.executeJavaScript('(async()=>{try{return typeof await globalThis.System?.resolve("cc")==="string";}catch{return false;}})()');`,
+                { id, name },
+            );
+            ready =
+                mapped &&
+                (await run('return !!app?.ui.inspect().views.some(view=>view.interactive);').catch(() => false));
             if (ready) break;
             await new Promise((resolve) => setTimeout(resolve, 150));
         }
@@ -64,7 +93,7 @@ return {x:Math.round(rect.left+p.x/canvas.width*rect.width),y:Math.round(rect.to
             'Bootstrap did not become ready: ' +
                 JSON.stringify(await editor(target + 'return w.__testErrors;', { id, name })),
         );
-        await work({ run, click, capture });
+        await work({ run, click, drag, resize, capture });
         assert.deepEqual(await editor(target + 'return w.__testErrors;', { id, name }), [], 'Runtime errors');
     } finally {
         await editor(target + 'w.destroy();return true;', { id, name });

@@ -317,6 +317,13 @@ const actions = {
     deleteModule,
     restore,
     async generate() {
+        await gameConfigTools.assertUnlocked(root());
+        if (!(await Editor.Message.request('asset-db', 'query-ready')))
+            throw Error('Creator 资源数据库尚未就绪，请等待首次导入完成后重新生成');
+        await require('../../tools/yzforge/operations/restore-directories.cjs').restoreDirectories({
+            inside,
+            request: (...args) => Editor.Message.request(...args),
+        });
         await gameSettings.refreshChannels();
         const preview = await runTool('preview'),
             obsoleteSet = new Set(preview.obsolete.map((item) => inside(item).toLowerCase())),
@@ -569,6 +576,7 @@ exports.load = function () {
     syncFs.watchFile(inside(gameConfigTools.sourcePath), { interval: 1000 }, scheduleGeneration);
     syncFs.watchFile(inside(gameConfigTools.selectionPath), { interval: 1000 }, scheduleGeneration);
     scheduleGeneration();
+    Editor.Message.addBroadcastListener('asset-db:ready', scheduleGeneration);
     for (const event of assetEvents) Editor.Message.addBroadcastListener(event, assetChanged);
     const source = inside('config-source');
     if (syncFs.existsSync(source)) {
@@ -591,6 +599,7 @@ exports.unload = function () {
     clearTimeout(autoTimer);
     sourceWatcher?.close();
     sourceWatcher = undefined;
+    Editor.Message.removeBroadcastListener('asset-db:ready', scheduleGeneration);
     for (const event of assetEvents) Editor.Message.removeBroadcastListener(event, assetChanged);
 };
 exports.methods = {

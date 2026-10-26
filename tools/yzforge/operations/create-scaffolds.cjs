@@ -106,7 +106,8 @@ exports.scaffold = async function (p, args) {
                 `import { _decorator } from 'cc';\nimport { ModuleEntry } from '${framework}/modules/module-entry';\nimport { create${type}Module } from './${type}Module';\nconst { ccclass } = _decorator;\n/** @internal 本地按需代码包入口；加载器读取工厂，业务不使用引擎生命周期启动模块。 */\n@ccclass('${id}.${type}ModuleEntry')\nexport class ${type}ModuleEntry extends ModuleEntry {\n    /** @internal 与 module.json 对应的模块 ID。 */\n    get moduleId(): string { return '${id}'; }\n    /** @internal 返回工厂函数，读取此属性不会执行业务初始化。 */\n    get factory() { return create${type}Module; }\n}\n`,
             );
             await waitClass(`${id}.${type}ModuleEntry`);
-            const content = await scene('createPrefab', `${id}.${type}ModuleEntry`, `${type}ModuleEntry`, false);
+            // Creator 会同步预制体名称与文件名；从预览起使用最终名称，保证原生读回一致。
+            const content = await scene('createPrefab', `${id}.${type}ModuleEntry`, 'entry', false);
             await request('asset-db', 'create-asset', url(path.join(directory, 'code/entry.prefab')), content);
             manifest.code = { mode: 'bundled', root: 'code', bundle: `code-${id}`, entryPath: 'entry' };
             await bundleFolder(directory, { root: 'code', id: manifest.code.bundle }, 'code');

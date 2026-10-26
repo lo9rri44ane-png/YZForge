@@ -5,7 +5,7 @@ import { StateBindings } from '../assets/framework/core/state-bindings';
 import { Events, eventKey } from '../assets/framework/core/events';
 import { VirtualListController } from '../assets/framework/ui/components/virtual-list/virtual-list-controller';
 import type { ItemContext } from '../assets/framework/ui/item-binding';
-import { FixedVirtualLayout } from '../assets/framework/ui/components/virtual-list/virtual-list-layout';
+import { VirtualLayout } from '../assets/framework/ui/components/virtual-list/virtual-list-layout';
 import { deferred, flush } from './fake-clock';
 
 type Cell = { id: number; active: boolean; text: string; disposed: boolean };
@@ -204,7 +204,7 @@ test('ready 跟随同 ID 的资源更新及更新期间的新版本，取消不�
 });
 
 test('固定列表、网格的尺寸、锚点无关位置和末行计算', () => {
-    const layout = new FixedVirtualLayout({
+    const layout = new VirtualLayout({
         itemWidth: 40,
         itemHeight: 20,
         columns: 3,
@@ -225,18 +225,18 @@ test('固定列表、网格的尺寸、锚点无关位置和末行计算', () =>
 });
 
 test('窗口采用半开边界，正确处理间距、空数据、零视口、回弹和预备行', () => {
-    const layout = new FixedVirtualLayout({ itemWidth: 10, itemHeight: 20, spacingY: 10, overscanRows: 0 });
+    const layout = new VirtualLayout({ itemWidth: 10, itemHeight: 20, spacingY: 10, overscanRows: 0 });
     assert.deepEqual(layout.range(50, 20, 0), { start: 0, end: 1 });
     assert.deepEqual(layout.range(50, 10, 20), { start: 0, end: 0 });
     assert.deepEqual(layout.range(50, 20, 30), { start: 1, end: 2 });
     assert.deepEqual(layout.range(50, 20, -100), { start: 0, end: 1 });
     assert.deepEqual(layout.range(0, 20, 0), { start: 0, end: 0 });
     assert.deepEqual(layout.range(50, 0, 0), { start: 0, end: 0 });
-    assert.deepEqual(new FixedVirtualLayout({ itemWidth: 10, itemHeight: 20 }).range(50, 40, 60), { start: 2, end: 6 });
+    assert.deepEqual(new VirtualLayout({ itemWidth: 10, itemHeight: 20 }).range(50, 40, 60), { start: 2, end: 6 });
 });
 
 test('四种定位方式正确夹紧，nearest 不移动已经可见及覆盖视口的条目', () => {
-    const layout = new FixedVirtualLayout({ itemWidth: 10, itemHeight: 20 });
+    const layout = new VirtualLayout({ itemWidth: 10, itemHeight: 20 });
     assert.equal(layout.offset(100, 60, 10, 'start', 0), 200);
     assert.equal(layout.offset(100, 60, 10, 'center', 0), 180);
     assert.equal(layout.offset(100, 60, 10, 'end', 0), 160);
@@ -257,10 +257,103 @@ test('非法布局不允许 NaN、无穷、零尺寸、负间距和小数列数'
         { columns: 0 },
         { overscanRows: 0.5 },
     ]) {
-        assert.throws(() => new FixedVirtualLayout({ itemWidth: 10, itemHeight: 10, ...input }), {
+        assert.throws(() => new VirtualLayout({ itemWidth: 10, itemHeight: 10, ...input }), {
             code: 'VIRTUAL_LIST_LAYOUT',
         });
     }
+});
+
+test('横向单行按宽度计算窗口、边距和四种定位，拒绝横向网格', () => {
+    const layout = new VirtualLayout({
+        axis: 'horizontal',
+        itemWidth: 40,
+        itemHeight: 20,
+        spacingX: 5,
+        paddingLeft: 8,
+        paddingRight: 2,
+        paddingTop: 3,
+        overscanRows: 0,
+    });
+    assert.equal(layout.extent(4), 185);
+    assert.equal(layout.crossSize, 23);
+    assert.deepEqual(layout.position(2), { x: 98, y: 3 });
+    assert.deepEqual(layout.range(4, 40, 53), { start: 1, end: 2 });
+    assert.deepEqual(layout.range(4, 5, 48), { start: 0, end: 0 });
+    assert.equal(layout.offset(4, 60, 2, 'start', 0), 98);
+    assert.equal(layout.offset(4, 60, 2, 'center', 0), 88);
+    assert.equal(layout.offset(4, 60, 2, 'end', 0), 78);
+    assert.equal(layout.offset(4, 60, 2, 'nearest', 85), 85);
+    assert.throws(() => new VirtualLayout({ axis: 'horizontal', itemWidth: 40, itemHeight: 20, columns: 2 }), {
+        code: 'VIRTUAL_LIST_LAYOUT',
+    });
+});
+
+test('变高窗口与逐项求交一致，滚动查询不重复计算高度', () => {
+    const heights = Array.from({ length: 1000 }, (_, i) => 7 + ((i * 71) % 137));
+    let measures = 0;
+    const layout = new VirtualLayout<number>(
+        {
+            itemWidth: 100,
+            itemHeight: (height) => {
+                measures++;
+                return height;
+            },
+            spacingY: 9,
+            paddingTop: 15,
+            paddingBottom: 27,
+            overscanRows: 0,
+        },
+        heights,
+    );
+    let next = 15;
+    const starts = heights.map((height) => {
+        const start = next;
+        next += height + 9;
+        return start;
+    });
+    assert.equal(layout.extent(heights.length), next - 9 + 27);
+    for (const viewport of [1, 9, 100, 500, 100000]) {
+        for (let offset = -3; offset < next + 500; offset += 131) {
+            const clamped = Math.max(0, Math.min(offset, Math.max(0, next - 9 + 27 - viewport)));
+            const visible = heights
+                .map((height, index) => ({ height, index }))
+                .filter(({ height, index }) => starts[index] < clamped + viewport && starts[index] + height > clamped)
+                .map(({ index }) => index);
+            const range = layout.range(heights.length, viewport, offset);
+            assert.deepEqual(
+                range,
+                visible.length ? { start: visible[0], end: visible.at(-1)! + 1 } : { start: 0, end: 0 },
+            );
+            assert.ok(range.end - range.start <= layout.capacity(heights.length, viewport));
+        }
+    }
+    assert.equal(measures, heights.length);
+    assert.equal(layout.offset(heights.length, 2, 3, 'nearest', starts[3] + 1), starts[3] + 1);
+    assert.equal(layout.offset(heights.length, 100, 3, 'center', 0), starts[3] + (heights[3] - 100) / 2);
+});
+
+test('变高数据更新原子校验并保留相同 Key 的绑定，清空后可恢复', async () => {
+    const f = fixture();
+    f.list.setLayout({ itemWidth: 100, itemHeight: (value) => (value > 0 ? value : NaN), overscanRows: 0 });
+    f.list.setViewport(100, 0);
+    f.list.setItems([20, 40, 60]);
+    await f.list.ready();
+    const first = f.renders.find((item) => item.item.key === 20)!.item;
+    const oldLayout = f.list.layout;
+    assert.throws(() => f.list.setItems([20, 0, 60]), { code: 'VIRTUAL_LIST_LAYOUT' });
+    assert.equal(f.list.layout, oldLayout);
+    assert.equal(f.list.contentExtent, 120);
+    f.list.setItems([20, 60, 40]);
+    await f.list.ready();
+    assert.equal(f.renders.find((item) => item.item.key === 20)!.item, first);
+    assert.equal(first.signal.aborted, false);
+    f.list.setItems([]);
+    await f.list.whenIdle();
+    assert.equal(f.list.inspect().slots, 0);
+    f.list.setItems([100]);
+    await f.list.ready();
+    assert.deepEqual(f.list.inspect().indices, [0]);
+    await f.owner.close();
 });
 
 test('十万条数据只创建窗口实例，长距离跳转复用节点且不重绑仍可见项', async () => {

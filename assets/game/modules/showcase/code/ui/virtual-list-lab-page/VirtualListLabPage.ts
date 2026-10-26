@@ -1,4 +1,4 @@
-import { _decorator, Button, Node, ScrollView } from 'cc';
+import { _decorator, Button, Label, Node, ScrollView } from 'cc';
 import { VirtualList, type VirtualListLayout } from '../../../../../../framework/ui/components/virtual-list';
 import type { BoundVirtualList } from '../../../../../../framework/ui/view-bindings';
 import { State } from '../../../../../../framework/core/state';
@@ -18,13 +18,14 @@ const { ccclass } = _decorator;
 @ccclass('showcase.VirtualListLabPage')
 export class VirtualListLabPage extends VirtualListLabPageBinding {
     private list?: BoundVirtualList<VirtualListDemoRow>;
+    private mode = 0;
     protected onShow(show: ViewShowContext<void, void>): void {
         const rows = Array.from({ length: 10000 }, (_, index) => ({
             id: index + 1,
             title: `条目 #${index + 1}`,
             revision: 0,
         }));
-        let grid = false;
+        this.mode = 0;
         this.ctx.badges.group(VirtualListBadges, 'sum', show.scope);
         const sources = rows
             .filter((row) => row.id % 100 === 1)
@@ -32,12 +33,13 @@ export class VirtualListLabPage extends VirtualListLabPageBinding {
         this.nodeBadge.getComponent(Badge)!.bind(this.ctx.badges, VirtualListBadges, show.scope);
         let pulse = 0;
         const scroll = this.nodeList.getComponent(ScrollView)!;
-        const layout = (): VirtualListLayout => {
+        const layout = (): VirtualListLayout<VirtualListDemoRow> => {
             const width = scroll.view!.width;
             return {
-                itemWidth: grid ? (width - 24) / 3 : width,
-                itemHeight: 88,
-                columns: grid ? 3 : 1,
+                axis: this.mode === 2 ? 'horizontal' : 'vertical',
+                itemWidth: this.mode === 1 ? (width - 24) / 3 : this.mode === 2 ? Math.min(width, 320) : width,
+                itemHeight: this.mode === 3 ? (row) => 88 + ((row.id + row.revision) % 4) * 32 : 88,
+                columns: this.mode === 1 ? 3 : 1,
                 spacingX: 12,
                 spacingY: 8,
                 overscanRows: 1,
@@ -57,8 +59,10 @@ export class VirtualListLabPage extends VirtualListLabPageBinding {
         show.listen(scroll.view!.node, Node.EventType.SIZE_CHANGED, () => list.setLayout(layout()));
         const bind = (button: Button, action: () => void) => show.listen(button.node, Button.EventType.CLICK, action);
         bind(this.btnBack, () => show.ui.back());
+        const modes = ['纵向列表', '固定网格', '横向列表', '变高列表'];
+        this.btnMode.getComponentInChildren(Label)!.string = '切换布局';
         bind(this.btnMode, () => {
-            grid = !grid;
+            this.mode = (this.mode + 1) % modes.length;
             list.setLayout(layout());
         });
         bind(this.btnJump, () => {
@@ -84,7 +88,8 @@ export class VirtualListLabPage extends VirtualListLabPageBinding {
         if (!this.list) return;
         const state = this.list.inspect();
         const window = state.count ? `${state.range.start + 1}–${state.range.end}` : '空';
-        this.lblOutput.string = `数据 ${state.count} 条 · 实例 ${state.slots} 个\n窗口 ${window} · 待处理 ${state.pending}`;
+        const mode = ['纵向', '网格', '横向', '变高'][this.mode];
+        this.lblOutput.string = `${mode} · 数据 ${state.count} 条 · 实例 ${state.slots} 个\n窗口 ${window} · 待处理 ${state.pending}`;
     }
     protected onHide(): void {
         this.list = undefined;

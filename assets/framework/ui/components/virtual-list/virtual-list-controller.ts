@@ -3,7 +3,7 @@ import { type Lifetime, runTask, Scope } from '../../../core/scope';
 import { Preparation } from '../../../core/preparation';
 import { ItemBinding, itemKeys, type ItemContext, type ItemKey } from '../../item-binding';
 import {
-    FixedVirtualLayout,
+    VirtualLayout,
     type VirtualListAlignment,
     type VirtualListLayout,
     type VirtualListRange,
@@ -26,7 +26,7 @@ export interface VirtualListSnapshot {
 /** @internal 引擎适配端口；create 必须把实例销毁登记到传入的所有者。 */
 export interface VirtualListAdapter<T, Item> {
     create(owner: Lifetime): Promise<Item>;
-    place(item: Item, index: number, layout: FixedVirtualLayout): void;
+    place(item: Item, index: number, layout: VirtualLayout<T>): void;
     bind(item: Item, context: ItemContext<T>): void | Promise<void>;
     /** 同 ID 数据更新也可能产生新的必需准备。 */
     preparation?(item: Item): Preparation;
@@ -51,7 +51,7 @@ type Slot<T, Item> = {
 export class VirtualListController<T, Item> {
     readonly scope: Scope;
     readonly preparation: Preparation;
-    layout: FixedVirtualLayout;
+    layout: VirtualLayout<T>;
     private data: readonly T[] = [];
     private keys: ItemKey[] = [];
     private viewport = 0;
@@ -67,12 +67,12 @@ export class VirtualListController<T, Item> {
 
     constructor(
         owner: Lifetime,
-        layout: VirtualListLayout,
+        layout: VirtualListLayout<T>,
         private readonly adapter: VirtualListAdapter<T, Item>,
         private readonly key: (data: T) => ItemKey,
         private readonly report: ErrorReporter = owner.report,
     ) {
-        this.layout = new FixedVirtualLayout(layout);
+        this.layout = new VirtualLayout(layout);
         this.scope = owner.child('virtual-list');
         this.preparation = new Preparation(this.scope.lifetime);
         this.scope.signal.onAbort(() => {
@@ -92,23 +92,26 @@ export class VirtualListController<T, Item> {
     setItems(items: readonly T[]): void {
         this.scope.signal.throwIfAborted();
         const keys = itemKeys(items, this.key);
-        this.data = items.slice();
+        const data = items.slice();
+        const layout = new VirtualLayout(this.layout.options, data);
+        this.data = data;
+        this.layout = layout;
         this.keys = keys;
         this.updateRequests();
     }
-    setLayout(layout: VirtualListLayout): void {
+    setLayout(layout: VirtualListLayout<T>): void {
         this.scope.signal.throwIfAborted();
-        this.layout = new FixedVirtualLayout(layout);
+        this.layout = new VirtualLayout(layout, this.data);
         this.updateRequests();
     }
-    setViewport(height: number, offset: number): void {
+    setViewport(size: number, offset: number): void {
         this.scope.signal.throwIfAborted();
         invariant(
-            Number.isFinite(height) && height >= 0 && Number.isFinite(offset),
+            Number.isFinite(size) && size >= 0 && Number.isFinite(offset),
             'VIRTUAL_LIST_VIEWPORT',
-            '视口高度和偏移必须为有效数值',
+            '视口长度和偏移必须为有效数值',
         );
-        this.viewport = height;
+        this.viewport = size;
         this.offset = offset;
         this.updateRequests();
     }
@@ -132,8 +135,8 @@ export class VirtualListController<T, Item> {
     get count(): number {
         return this.data.length;
     }
-    get contentHeight(): number {
-        return Math.max(this.viewport, this.layout.height(this.count));
+    get contentExtent(): number {
+        return Math.max(this.viewport, this.layout.extent(this.count));
     }
     get scrollOffset(): number {
         return this.layout.clampOffset(this.count, this.viewport, this.offset);

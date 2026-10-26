@@ -2,6 +2,8 @@
 
 本文维护当前实现的边界与验证入口。使用方法从 [README 文档目录](../README.md#文档) 进入；检查是否通过，以目标版本当次执行的日志和产物为准。
 
+最近一次实测记录：[2026-10-26 Web 发布、空项目试跑与虚拟列表验收](acceptance-2026-10-26.md)。
+
 ## 能力边界
 
 | 范围         | 当前约定与限制                                                                                                                                                                                                                               |
@@ -13,7 +15,7 @@
 | 配置表       | XLSX 导出 JSON 和 TypeScript 合同，未实现二进制数据格式。公式重算仅提供 Windows 桌面 Excel COM 适配；复杂公式及外部工作簿联动需使用项目实际数据验收。                                                                                        |
 | 时间         | 固定 UTC 偏移，不支持 IANA 时区或夏令时。服务器时间源由项目注入；跨重启计划、补算和结算去重由业务保存。                                                                                                                                      |
 | HTTP 与 SDK  | HTTP 支持 XHR、wx/tt 请求及自定义传输；不含 WebSocket、自动重连或令牌刷新。SDK 提供平台与渠道组合入口，发行商、真实登录和广告需项目接入。                                                                                                    |
-| UI 组件      | 虚拟列表只支持固定尺寸纵向列表/网格。SafeWidget 和聚焦引导限同一正交 Canvas 的轴对齐布局；MarqueeLabel 为单行普通文本。详细限制见各组件文档。                                                                                                |
+| UI 组件      | 虚拟列表支持纵向固定网格、数据决定行高的纵向单列和横向固定单行；不自动测量异步内容高度。SafeWidget 和聚焦引导限同一正交 Canvas 的轴对齐布局；MarqueeLabel 为单行普通文本。详细限制见各组件文档。                                             |
 | 制作恢复     | 创建中断可整次检查、清理残留；创建完成后的生成错误保留成果并正常重新生成。生成写入、删除和构建各有恢复流程；冲突会停止，不保证任意崩溃时刻自动恢复。包内移动保持资源身份，跨包迁移和全项目重命名需要另行处理引用。                           |
 | 静态检查     | 可检查显式导入、序列化引用、已知逻辑名及配置引用；不能完整证明反射、字符串拼接和动态表达式的行为。                                                                                                                                           |
 | 交付审计     | 检查 Bundle/代码入口归属、未压缩输出字节、完整文件重复和体积预算；不分析图集/合并 JSON 内部的语义重复，不提供 CDN 发布、原生代码热更新或跨版本补丁系统。                                                                                     |
@@ -55,28 +57,28 @@ npm run test:integration -- ui startup --url http://localhost:7456/
 
 `--list` 列出各组需要保留的示例；`ui` 包含排序、生命周期和清理回归，`startup` 检查启动反馈及重试屏障，`presentation` 检查状态、准备与页面组合。其余可选组为 `diagnostics`、`performance`、`components`、`resources`、`localization`、`audio`、`network`、`list` 和 `showcase`。此入口不自动运行会修改项目资产的工作台检查，也不替代需要特定构建配置的检查。未传功能组时只显示用法。
 
-| 入口（位于 `tests/integration/`）                                                           | 前置条件与覆盖范围                                                                                                                               |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [verify-observability.mjs](../tests/integration/verify-observability.mjs)                   | 当前项目预览或 Web URL；验证 App 错误/日志出口、模块/事件上下文和取消后任务保留                                                                  |
-| [verify-performance.mjs](../tests/integration/verify-performance.mjs)                       | 保留展示模块；记录真实页面打开、滚动耗时、实例上限及关闭后持有数量                                                                               |
-| [verify-workbench.mjs](../tests/integration/verify-workbench.mjs)                           | Creator 与 MCP 已连接；创建临时模块，检查脚本、Part、绑定、XLSX、删除及恢复。成功后回收，失败保留现场；`--keep-for-build` 可保留夹具供构建检查。 |
-| [verify-creation.mjs](../tests/integration/verify-creation.mjs)                             | Creator 与 MCP 已连接；创建中断、残留清理、后续修改冲突、生成错误与创建成果分离。                                                                |
-| [verify-panel.mjs](../tests/integration/verify-panel.mjs)                                   | 保留示例数据；检查真实工作台预览、页面公开范围、草稿、设置及生成恢复。                                                                           |
-| [verify-preview.mjs](../tests/integration/verify-preview.mjs)                               | Bootstrap 已在 Game View 运行且保留大厅示例；检查 UI、结果与生命周期。                                                                           |
-| [verify-build.mjs](../tests/integration/verify-build.mjs)                                   | 保留大厅示例，用 `serve-build.mjs` 启动构建产物并传入 URL；可选第二个参数为工作台测试模块 ID，额外检查 Part 代码按需加载。                       |
-| [verify-runtime.mjs](../tests/integration/verify-runtime.mjs)                               | 参数传入 Web 运行 URL，保留大厅示例；在独立窗口执行底层运行时回归。                                                                              |
-| [verify-framework-lifecycle.mjs](../tests/integration/verify-framework-lifecycle.mjs)       | 参数传入预览或 Web 运行 URL，保留展示模块；验证 UI 加载/显示取消、透明度、缓存复用、动态组件宿主和滚动文字/倒计时语言绑定，不修改编辑场景。      |
-| [verify-ui-ordering.mjs](../tests/integration/verify-ui-ordering.mjs)                       | 参数传入本机预览或 Web URL，保留默认首屏；真实鼠标检查三个弹窗的全部加载顺序、缓存重开、无变化不移动节点、慢清理期间输入恢复及跨层遮挡。         |
-| [verify-startup-feedback.mjs](../tests/integration/verify-startup-feedback.mjs)             | 参数传入本机预览或 Web URL，保留默认 GameRoot 与首屏；检查 SDK 超时、同步构造失败、业务启动失败的提前反馈、重入防护与清理后的重试。              |
-| [verify-audio.mjs](../tests/integration/verify-audio.mjs)                                   | 参数传入预览或 Web 构建 URL，保留大厅音频示例；验证前后台恢复、BGM 并发容量、取消和失败后的名额及引用回收，不保存编辑场景。                      |
-| [verify-ui-cleanup.mjs](../tests/integration/verify-ui-cleanup.mjs)                         | 参数传入本机预览或 Web 构建 URL，保留展示模块；验证缓存界面清理失败后仍释放其他实例、UI 层和资源。                                               |
-| [verify-showcase.mjs](../tests/integration/verify-showcase.mjs)                             | 参数传入 Web 运行 URL，保留全部示例；检查业务、导航、分包、持有回收及屏幕适配。                                                                  |
-| [verify-virtual-list.mjs](../tests/integration/verify-virtual-list.mjs)                     | 参数传入预览或 Web 运行 URL；检查列表窗口、复用、定位、Part 清理及尺寸变化。                                                                     |
-| [verify-resources-localization.mjs](../tests/integration/verify-resources-localization.mjs) | 参数传入预览或 Web 运行 URL；检查批量资源失败回收、Prefab 池实际任务屏障、按需语言 Bundle、文本与图标、默认语言回退、页面关闭和屏幕适配。        |
-| [verify-ui-components.mjs](../tests/integration/verify-ui-components.mjs)                   | 参数传入预览或 Web 运行 URL；检查真实输入、原生组件、资源、计时和安全区。                                                                        |
-| [verify-network-guide.mjs](../tests/integration/verify-network-guide.mjs)                   | 参数传入预览或 Web 运行 URL；检查红点、真实本机 XHR、聚焦、输入、恢复与清理。                                                                    |
-| [verify-game-settings.mjs](../tests/integration/verify-game-settings.mjs)                   | 需两份指定配置的 Web 构建，步骤见 [游戏设置与 SDK](game-settings-sdk.md#验证)。                                                                  |
-| [verify-template.mjs](../tests/integration/verify-template.mjs)                             | 需已清空示例的独立副本构建，步骤见 [复制项目](copy-project.md#验证副本)。                                                                        |
+| 入口（位于 `tests/integration/`）                                                                                                                | 前置条件与覆盖范围                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [verify-observability.mjs](../tests/integration/verify-observability.mjs)                                                                        | 当前项目预览或 Web URL；验证 App 错误/日志出口、模块/事件上下文和取消后任务保留                                                                  |
+| [verify-performance.mjs](../tests/integration/verify-performance.mjs)                                                                            | 保留展示模块；记录真实页面打开、滚动耗时、实例上限及关闭后持有数量                                                                               |
+| [verify-workbench.mjs](../tests/integration/verify-workbench.mjs)                                                                                | Creator 与 MCP 已连接；创建临时模块，检查脚本、Part、绑定、XLSX、删除及恢复。成功后回收，失败保留现场；`--keep-for-build` 可保留夹具供构建检查。 |
+| [verify-creation.mjs](../tests/integration/verify-creation.mjs)                                                                                  | Creator 与 MCP 已连接；创建中断、残留清理、后续修改冲突、生成错误与创建成果分离。                                                                |
+| [verify-panel.mjs](../tests/integration/verify-panel.mjs)                                                                                        | 保留示例数据；检查真实工作台预览、页面公开范围、草稿、设置及生成恢复。                                                                           |
+| [verify-preview.mjs](../tests/integration/verify-preview.mjs)                                                                                    | Bootstrap 已在 Game View 运行且保留大厅示例；检查 UI、结果与生命周期。                                                                           |
+| [verify-build.mjs](../tests/integration/verify-build.mjs)                                                                                        | 保留大厅示例，用 `serve-build.mjs` 启动构建产物并传入 URL；可选第二个参数为工作台测试模块 ID，额外检查 Part 代码按需加载。                       |
+| [verify-runtime.mjs](../tests/integration/verify-runtime.mjs)                                                                                    | 参数传入 Web 运行 URL，保留大厅示例；在独立窗口执行底层运行时回归。                                                                              |
+| [verify-framework-lifecycle.mjs](../tests/integration/verify-framework-lifecycle.mjs)                                                            | 参数传入预览或 Web 运行 URL，保留展示模块；验证 UI 加载/显示取消、透明度、缓存复用、动态组件宿主和滚动文字/倒计时语言绑定，不修改编辑场景。      |
+| [verify-ui-ordering.mjs](../tests/integration/verify-ui-ordering.mjs)                                                                            | 参数传入本机预览或 Web URL，保留默认首屏；真实鼠标检查三个弹窗的全部加载顺序、缓存重开、无变化不移动节点、慢清理期间输入恢复及跨层遮挡。         |
+| [verify-startup-feedback.mjs](../tests/integration/verify-startup-feedback.mjs)                                                                  | 参数传入本机预览或 Web URL，保留默认 GameRoot 与首屏；检查 SDK 超时、同步构造失败、业务启动失败的提前反馈、重入防护与清理后的重试。              |
+| [verify-audio.mjs](../tests/integration/verify-audio.mjs)                                                                                        | 参数传入预览或 Web 构建 URL，保留大厅音频示例；验证前后台恢复、BGM 并发容量、取消和失败后的名额及引用回收，不保存编辑场景。                      |
+| [verify-ui-cleanup.mjs](../tests/integration/verify-ui-cleanup.mjs)                                                                              | 参数传入本机预览或 Web 构建 URL，保留展示模块；验证缓存界面清理失败后仍释放其他实例、UI 层和资源。                                               |
+| [verify-showcase.mjs](../tests/integration/verify-showcase.mjs)                                                                                  | 参数传入 Web 运行 URL，保留全部示例；检查业务、导航、分包、持有回收及屏幕适配。                                                                  |
+| [verify-virtual-list.mjs](../tests/integration/verify-virtual-list.mjs)、[verify-list-layouts.mjs](../tests/integration/verify-list-layouts.mjs) | 参数传入预览或 Web 运行 URL；检查列表窗口、复用、定位、Part 清理、横向真实拖动、变高几何及横竖屏变化。                                           |
+| [verify-resources-localization.mjs](../tests/integration/verify-resources-localization.mjs)                                                      | 参数传入预览或 Web 运行 URL；检查批量资源失败回收、Prefab 池实际任务屏障、按需语言 Bundle、文本与图标、默认语言回退、页面关闭和屏幕适配。        |
+| [verify-ui-components.mjs](../tests/integration/verify-ui-components.mjs)                                                                        | 参数传入预览或 Web 运行 URL；检查真实输入、原生组件、资源、计时和安全区。                                                                        |
+| [verify-network-guide.mjs](../tests/integration/verify-network-guide.mjs)                                                                        | 参数传入预览或 Web 运行 URL；检查红点、真实本机 XHR、聚焦、输入、恢复与清理。                                                                    |
+| [verify-game-settings.mjs](../tests/integration/verify-game-settings.mjs)                                                                        | 需两份指定配置的 Web 构建，步骤见 [游戏设置与 SDK](game-settings-sdk.md#验证)。                                                                  |
+| [verify-template.mjs](../tests/integration/verify-template.mjs)                                                                                  | 需已清空示例的独立副本构建，步骤见 [复制项目](copy-project.md#验证副本)。                                                                        |
 
 传入的 URL 必须属于当前项目。浏览器集成脚本通过 MCP 创建测试窗口；手工启动的静态服务由启动者停止。工作台脚本会实际创建、删除或恢复自己的测试资产，不是只读检查。截图通常写入忽略目录 `temp/mcp-captures`，不作为可在新检出中直接查看的证据。
 
@@ -100,15 +102,17 @@ npm run benchmark:node -- --baseline .yzforge/performance/此前的Node报告.js
 npm run benchmark:runtime -- http://localhost:7456/ --baseline .yzforge/performance/此前的运行时报告.json
 ```
 
-URL 换成当前项目的实际地址。Node 基线检查 250 个派生分支在 2000 次无关源更新中不额外计算，以及十万条固定高度列表在跳转中保持有限实例数。Creator 基线预热后多次打开/关闭真实列表页，采集打开耗时和滚动帧间隔，检查实例上限及资源/配置/界面持有回到预热后的基准。首轮冷打开单独记录；有缓存的持有基准不要求为零。
+URL 换成当前项目的实际地址。Node 基线检查 250 个派生分支在 2000 次无关源更新中不额外计算，以及十万条固定高度列表在跳转中保持有限实例数。Creator 基线预热后多次打开/关闭真实列表页，分别采集纵向固定、横向固定和纵向变高列表的滚动帧间隔，检查实例上限及资源/配置/界面持有回到预热后的基准。首轮冷打开单独记录；有缓存的持有基准不要求为零。
 
 报告保存到 `.yzforge/performance/`，包含 median、p95、max、样本数、环境和场景参数。第一次运行仅记录时间基线，结构性预算仍会校验；实例数、持有回落或耗时检查失败也会保存已采集的数据和原因。传入 `--baseline` 才比较耗时，失败报告不能作为基线。[performance-budgets.json](../project-settings/performance-budgets.json) 默认允许 p95 不超过旧值的 1.3 倍加 2 ms，并设置运行时采样和实例上限。Node/浏览器/引擎、预览或构建模式、CPU、视口和场景配置不同会拒绝比较；先在对应环境重建基线，不跨设备混用。
+
+预览模式读取 `cc/env`；发布包的环境常量被编译器内联，基线脚本改为读取 `yzforge-build.json` 并核对运行中配置哈希。无法识别环境时停止，不把构建误记为预览。
 
 耗时受系统负载、温度和渲染环境影响，应在稳定设备上采样。Electron 测试窗口的数据只验证该运行环境；持有数量回落不等于引擎 GPU 或原生堆无泄漏。目标设备的内存、帧率、下载和启动时间仍需发布构建与真机验收。
 
 ## 构建与结果判定
 
-保存 `Bootstrap/GameRoot/GameSettings` 后导出构建参数，构建流程见 [游戏设置与 SDK](game-settings-sdk.md#构建与预览模拟)。构建钩子检查配置一致性、UI 类注册、模块边界和产物归属，报告写入 `.yzforge/build-reports`。已有构建还可单独审计：
+保存 `Bootstrap/GameRoot/GameSettings` 后导出构建参数，构建流程见 [游戏设置与 SDK](game-settings-sdk.md#构建与预览模拟)。构建钩子检查配置一致性、TypeScript、模块边界和产物归属，报告写入 `.yzforge/build-reports`。编辑器构建额外检查 UI 类注册；命令行构建不启动编辑器脚本运行时，因此不以编辑场景注册表判断脚本有效性。两种入口都必须经过 Creator 编译，并在构建 URL 上运行对应集成组。已有构建还可单独审计：
 
 ```powershell
 node tools/yzforge/cli.mjs audit-build --output build/web-mobile --platform web-mobile

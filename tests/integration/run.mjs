@@ -39,7 +39,7 @@ const groups = {
     network: { description: '真实本机 HTTP、红点与聚焦引导；需展示模块', files: ['verify-network-guide.mjs'] },
     list: {
         description: '虚拟列表、复用、尺寸变化及组合容器独占；需展示模块',
-        files: ['verify-virtual-list.mjs', 'verify-container-ownership.mjs'],
+        files: ['verify-virtual-list.mjs', 'verify-list-layouts.mjs', 'verify-container-ownership.mjs'],
     },
     showcase: { description: '全部功能展示与页面导航；需包含全部示例的 Web 构建', files: ['verify-showcase.mjs'] },
 };

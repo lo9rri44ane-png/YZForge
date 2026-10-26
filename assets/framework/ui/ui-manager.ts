@@ -984,6 +984,8 @@ export class UIManager {
         try {
             await record.preparing;
         } catch (error) {
+            // 返回页面准备期间关停会主动取消 show；不要把已有的正常关闭改写为清理失败。
+            if (error instanceof OperationCancelled && record.termination) return;
             void this.requestClose(record, { status: 'failed', error, cleanupPending: false }).catch(this.report);
         }
     }

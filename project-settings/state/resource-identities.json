@@ -37,6 +37,12 @@
       "active": true,
       "source": "assets/game/modules/showcase/bundles/default/dynamic/ui/ConfirmPopup.prefab"
     },
+    "1172fb05-4651-481e-bd44-624906eb19b1": {
+      "id": "workbench-check-mvov806v/default/prefab/prefabs/item-part",
+      "type": "Prefab",
+      "active": false,
+      "source": "assets/game/modules/workbench-check-mvov806v/bundles/default/dynamic/prefabs/ItemPart.prefab"
+    },
     "12e49999-f446-4638-9250-bee204247220": {
       "id": "showcase/default/prefab/ui/network-lab-page",
       "type": "Prefab",
@@ -96,6 +102,12 @@
       "type": "Prefab",
       "active": true,
       "source": "assets/game/modules/showcase/bundles/default/dynamic/ui/LocalizationLabPage.prefab"
+    },
+    "4218af57-2bdb-43bf-9951-63c28faa0b3a": {
+      "id": "workbench-check-mvov806v/default/json/config/entries",
+      "type": "JsonAsset",
+      "active": false,
+      "source": "assets/game/modules/workbench-check-mvov806v/bundles/default/dynamic/config/entries.json"
     },
     "43a42794-2e19-48a8-90de-d13471a55b56": {
       "id": "showcase/default/audio/audio/chime",
@@ -198,6 +210,12 @@
       "type": "Prefab",
       "active": true,
       "source": "assets/game/modules/workshop/bundles/default/dynamic/ui/WorkflowPage.prefab"
+    },
+    "907e7df2-106a-4caf-9635-4d4e1afea375": {
+      "id": "workbench-check-mvov806v/default/prefab/ui/reward-popup",
+      "type": "Prefab",
+      "active": false,
+      "source": "assets/game/modules/workbench-check-mvov806v/bundles/default/dynamic/ui/RewardPopup.prefab"
     },
     "91b45fca-617b-4fa0-82bb-e5f2871b57fa": {
       "id": "lobby/default/prefab/dashboard",

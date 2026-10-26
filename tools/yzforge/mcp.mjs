@@ -31,7 +31,15 @@ async function rpc(method, params) {
     return payload.result;
 }
 function decode(result) {
-    const value = result.structuredContent ?? JSON.parse(result.content.find((item) => item.type === 'text').text);
+    let value = result.structuredContent;
+    if (!value) {
+        const raw = result.content?.find((item) => item.type === 'text')?.text;
+        try {
+            value = JSON.parse(raw);
+        } catch {
+            throw Error(raw || 'MCP returned no structured result');
+        }
+    }
     if (result.isError || value.ok === false) throw Error(JSON.stringify(value));
     return value;
 }
@@ -43,7 +51,8 @@ export async function call(name, args = {}) {
             capabilities: {},
             clientInfo: { name: 'yzforge-tools', version: '0.1.0' },
         });
-        const state = decode(await rpc('tools/call', { name: 'get_editor_state', arguments: {} }));
+        // 初次导入或没有打开场景时也必须能执行打开场景、资源修复等操作。
+        const state = decode(await rpc('tools/call', { name: 'get_project_info', arguments: {} }));
         const normalize = (path) => realpathSync(path).replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
         if (normalize(state.data.projectPath) !== normalize(root))
             throw Error(`Wrong editor project: ${state.data.projectPath}`);

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { EventEmitter } from 'node:events';
 import vm from 'node:vm';
 
 const entry = new URL('../extensions/yzforge-editor/main.js', import.meta.url);
@@ -17,6 +18,7 @@ function editor(
 ) {
     const timers = new Set();
     const watchers = new Map();
+    const broadcasts = new EventEmitter();
     const warnings = [];
     const requests = [];
     const exported = {};
@@ -40,10 +42,11 @@ function editor(
         Editor: {
             Project: { path: fileURLToPath(new URL('../', import.meta.url)) },
             Message: {
-                addBroadcastListener() {},
-                removeBroadcastListener() {},
+                addBroadcastListener: (event, listener) => broadcasts.on(event, listener),
+                removeBroadcastListener: (event, listener) => broadcasts.off(event, listener),
                 request: async (...args) => {
                     requests.push(args);
+                    if (args[0] === 'asset-db' && args[1] === 'query-ready') return true;
                 },
             },
         },
@@ -71,6 +74,8 @@ function editor(
         change() {
             for (const listener of watchers.values()) listener();
         },
+        broadcast: (event, ...args) => broadcasts.emit(event, ...args),
+        listenerCount: (event) => broadcasts.listenerCount(event),
         status: () => JSON.parse(vm.runInContext('JSON.stringify(autoStatus)', context)),
         pending: () => timers.size,
         unload: () => exported.unload(),
@@ -85,6 +90,36 @@ function editor(
         warnings,
     };
 }
+
+test('自动生成：首次导入未完成时等待资源就绪，资源变化不重复注册监听，卸载后停止响应', async () => {
+    let ready = false;
+    let generated = 0;
+    const editorState = editor(async () => {
+        if (!ready) throw Error('AssetDB importing');
+        generated++;
+    });
+    try {
+        await editorState.advance();
+        assert.equal(editorState.status().state, 'error');
+        assert.equal(editorState.pending(), 0);
+        ready = true;
+        editorState.broadcast('asset-db:ready');
+        await editorState.advance();
+        assert.equal(generated, 1);
+        assert.equal(editorState.status().state, 'ready');
+        for (let i = 0; i < 3; i++)
+            editorState.broadcast('asset-db:asset-change', 'db://assets/game/modules/catalog/module.json');
+        assert.equal(editorState.listenerCount('asset-db:ready'), 1);
+        assert.equal(editorState.pending(), 1);
+    } finally {
+        editorState.unload();
+    }
+    assert.equal(editorState.listenerCount('asset-db:ready'), 0);
+    editorState.broadcast('asset-db:ready');
+    editorState.broadcast('asset-db:asset-change', 'db://assets/game/modules/catalog/module.json');
+    assert.equal(editorState.pending(), 0);
+    assert.equal(generated, 1);
+});
 
 test('自动生成：构建锁期间合并修改，释放锁后无需再次保存即可生成最新配置', async () => {
     let busy = true;
@@ -160,7 +195,10 @@ test('使用方错误仍在刷新生成资产后抛出，创建成功后生成�
             generationError = error;
             assert.equal(error.message, '资源索引和 Key 已更新，请修复以下引用后重新检查：\nbad type');
             assert.deepEqual(JSON.parse(JSON.stringify(error.diagnostics)), diagnostics);
-            assert.deepEqual(editorState.requests, [['asset-db', 'refresh-asset', 'db://assets']]);
+            assert.deepEqual(editorState.requests, [
+                ['asset-db', 'query-ready'],
+                ['asset-db', 'refresh-asset', 'db://assets'],
+            ]);
             return true;
         });
         let creations = 0;

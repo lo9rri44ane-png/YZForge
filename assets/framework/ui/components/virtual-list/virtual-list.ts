@@ -7,7 +7,7 @@ import { VirtualListController, type VirtualListSnapshot } from './virtual-list-
 import { PartPresentation, type PartOptions, type PartCell } from '../../part-presentation';
 import { ViewBindings } from '../../view-bindings';
 import type { ItemKey } from '../../item-binding';
-import { FixedVirtualLayout, type VirtualListAlignment, type VirtualListLayout } from './virtual-list-layout';
+import { VirtualLayout, type VirtualListAlignment, type VirtualListLayout } from './virtual-list-layout';
 import type { Preparation } from '../../../core/preparation';
 import { claimProperties } from '../../../core/property-lease';
 
@@ -21,8 +21,8 @@ export interface VirtualListOptions<T, Part extends GameComponent> extends PartO
     readonly assets: AssetAccess;
     /** 稳定业务身份，必须唯一；不能使用列表索引。 */
     readonly key: (data: T) => ItemKey;
-    /** 固定尺寸、列数、间距、边距和预备行配置。 */
-    readonly layout: VirtualListLayout;
+    /** 滚动方向、条目尺寸、列数、间距、边距和预备行配置。 */
+    readonly layout: VirtualListLayout<T>;
     /** @internal 宿主显示期间的输入检查；通过 show.bindings.list 自动提供。 */
     readonly interactive?: () => boolean;
     /** 可选同步错误上报器，不应抛错；失败条目保持隐藏，refresh 或重新进入窗口后重试。 */
@@ -56,11 +56,11 @@ export interface VirtualListHandle<T> {
      */
     refresh(indices?: Iterable<number>): void;
     /**
-     * 修改固定尺寸/列数配置并重新排布；仍可见条目不重新绑定数据。
+     * 修改布局并重新排布；仍可见条目不重新绑定数据，切换方向时回到起点。
      * @param layout 完整的新布局；列数不随屏幕宽度自动变化。
-     * @throws VIRTUAL_LIST_LAYOUT 参数非法；VIRTUAL_LIST_SETUP 总列宽超过视口；原配置保留。
+     * @throws VIRTUAL_LIST_LAYOUT 参数非法；VIRTUAL_LIST_SETUP 非滚动方向尺寸超过视口；原配置保留。
      */
-    setLayout(layout: VirtualListLayout): void;
+    setLayout(layout: VirtualListLayout<T>): void;
     /**
      * 滚动到指定零基索引；索引越界（含空列表）时抛错。
      * @param index 目标条目的零基索引。
@@ -85,7 +85,7 @@ export interface VirtualListHandle<T> {
 }
 
 /**
- * 固定尺寸纵向虚拟列表/网格。挂在 ScrollView 同一节点，使用标准 View/Mask/Content 结构。
+ * 纵向固定网格、变高列表及横向固定单行。挂在 ScrollView 同一节点，使用标准 View/Mask/Content 结构。
  * Content 必须为空且不受 Layout/Widget 驱动；本组件管理其锚点、尺寸和条目位置，ScrollView 管滚动。
  * 页面每次 onShow 用 mount 创建会话；禁用、销毁或 owner 结束时取消会话，重新启用须重新 mount。
  */
@@ -153,7 +153,8 @@ export class VirtualList extends Component {
                     },
                     place: (cell, index, layout) => {
                         const itemTransform = cell.node.getComponent(UITransform)!;
-                        const { itemWidth, itemHeight } = layout.options;
+                        const { itemWidth } = layout.options;
+                        const itemHeight = layout.itemHeight(index);
                         if (itemTransform.width !== itemWidth || itemTransform.height !== itemHeight) {
                             itemTransform.setContentSize(itemWidth, itemHeight);
                             // ON_WINDOW_RESIZE 不会响应复用时的根尺寸变化；仅在尺寸改变时立即对齐子 Widget。
@@ -194,29 +195,39 @@ export class VirtualList extends Component {
             );
             let syncing = false;
             const assertActive = () => controller.scope.signal.throwIfAborted();
-            const checkWidth = (layout: typeof controller.layout) =>
+            const checkCrossSize = (layout: typeof controller.layout) =>
                 invariant(
-                    layout.width <= view.width + 0.01,
+                    layout.crossSize <= (layout.horizontal ? view.height : view.width) + 0.01,
                     'VIRTUAL_LIST_SETUP',
-                    '固定列宽和边距超过视口，请缩小条目或减少列数',
+                    '非滚动方向的条目尺寸和边距超过视口，请缩小条目或减少列数',
                 );
+            const viewport = () => (controller.layout.horizontal ? view.width : view.height);
+            const readOffset = () =>
+                controller.layout.horizontal ? -scroll.getScrollOffset().x : scroll.getScrollOffset().y;
+            const offsetVector = (offset: number) =>
+                controller.layout.horizontal ? new Vec2(offset, 0) : new Vec2(0, offset);
             const sync = (reset = false) => {
                 if (syncing || controller.scope.signal.aborted) return;
                 syncing = true;
                 try {
-                    const offset = reset ? 0 : scroll.getScrollOffset().y;
-                    controller.setViewport(view.height, offset);
-                    transform.setContentSize(view.width, controller.contentHeight);
+                    const offset = reset ? 0 : readOffset();
+                    controller.setViewport(viewport(), offset);
+                    scroll.horizontal = controller.layout.horizontal;
+                    scroll.vertical = !controller.layout.horizontal;
+                    transform.setContentSize(
+                        controller.layout.horizontal ? controller.contentExtent : view.width,
+                        controller.layout.horizontal ? view.height : controller.contentExtent,
+                    );
                     scroll.stopAutoScroll();
-                    scroll.scrollToOffset(new Vec2(0, controller.scrollOffset));
-                    controller.setViewport(view.height, scroll.getScrollOffset().y);
+                    content.setPosition(-view.anchorX * view.width, (1 - view.anchorY) * view.height, 0);
+                    scroll.scrollToOffset(offsetVector(controller.scrollOffset));
+                    controller.setViewport(viewport(), readOffset());
                 } finally {
                     syncing = false;
                 }
             };
             const scrolling = () => {
-                if (!syncing && !controller.scope.signal.aborted)
-                    controller.setViewport(view.height, scroll.getScrollOffset().y);
+                if (!syncing && !controller.scope.signal.aborted) controller.setViewport(viewport(), readOffset());
             };
             const resized = () => {
                 try {
@@ -234,9 +245,7 @@ export class VirtualList extends Component {
             controller.scope.defer(() => {
                 detach();
             });
-            checkWidth(controller.layout);
-            scroll.horizontal = false;
-            scroll.vertical = true;
+            checkCrossSize(controller.layout);
             transform.setAnchorPoint(0, 1);
             content.setPosition(-view.anchorX * view.width, (1 - view.anchorY) * view.height, 0);
             sync(true);
@@ -255,15 +264,19 @@ export class VirtualList extends Component {
                     controller.setItems(items);
                     sync(resetScroll);
                 },
-                updateItem: (index: number, data: T) => controller.updateItem(index, data),
+                updateItem: (index: number, data: T) => {
+                    controller.updateItem(index, data);
+                    sync();
+                },
                 refresh: (indices?: Iterable<number>) => controller.refresh(indices),
-                setLayout: (layout: VirtualListLayout) => {
+                setLayout: (layout: VirtualListLayout<T>) => {
                     assertActive();
                     // 先校验，不让失败配置破坏当前可用列表。
-                    const candidate = new FixedVirtualLayout(layout);
-                    checkWidth(candidate);
+                    const candidate = new VirtualLayout(layout);
+                    checkCrossSize(candidate);
+                    const reset = candidate.horizontal !== controller.layout.horizontal;
                     controller.setLayout(layout);
-                    sync();
+                    sync(reset);
                 },
                 scrollToIndex: (index: number, alignment: VirtualListAlignment = 'start', durationSeconds = 0) => {
                     assertActive();
@@ -274,7 +287,7 @@ export class VirtualList extends Component {
                     );
                     const target = controller.scrollTarget(index, alignment);
                     scroll.stopAutoScroll();
-                    scroll.scrollToOffset(new Vec2(0, target), durationSeconds);
+                    scroll.scrollToOffset(offsetVector(target), durationSeconds);
                     scrolling();
                 },
                 whenIdle: () => controller.whenIdle(),

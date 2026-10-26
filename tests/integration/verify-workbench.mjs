@@ -33,7 +33,7 @@ assert.ok(
     ![...initial.modules, ...initial.orphans].some((item) => item.id === module),
     'Previous fixture exists; inspect it before retrying',
 );
-await create({ kind: 'module', id: module, codeOnly: true, displayName: '工作台集成验证' });
+await create({ kind: 'module', id: module, delivery: 'bundled', codeOnly: true, displayName: '工作台集成验证' });
 let removed = false,
     passed = false;
 try {

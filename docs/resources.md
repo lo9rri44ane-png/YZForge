@@ -72,7 +72,7 @@ await lease.release();
 
 `show.assets.createPool` 由本次页面展示持有，离开页面自动关闭并销毁节点。`ctx.assets.createPool` 默认由模块持有，适合跨页面共享。跨页面池的每次 `spawn` 仍应传当前使用者的期限。`pool.close()` 可提前结束池；`pool.inspect()` 提供只读容量摘要。不要自行销毁池内节点、将它们交给另一个池，或缓存已经失效的句柄。
 
-完整 UIView 继续由 UIManager 管理，不能放进 PrefabPool；固定尺寸滚动列表继续使用 [VirtualList](virtual-list.md)，其条目绑定和复用已经集成。
+完整 UIView 继续由 UIManager 管理，不能放进 PrefabPool；虚拟滚动列表继续使用 [VirtualList](virtual-list.md)，其条目绑定和复用已经集成。
 
 ## 示例与验证
 

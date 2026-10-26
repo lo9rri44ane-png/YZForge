@@ -63,6 +63,8 @@ npm install --package-lock-only --ignore-scripts
 
 用 **Creator 3.8.8** 打开副本，等待首次导入完成，再检查项目扩展 `yzforge-editor` 是否启用。`tsconfig.json` 引用 Creator 生成的 `temp/tsconfig.cocos.json`，所以先导入，再执行完整类型检查。渠道与构建参数的完整流程见 [游戏设置与 SDK](game-settings-sdk.md)。
 
+Git 检出或归档不包含空目录，但仍保留目录 `.meta`。工作台生成前会通过 AssetDB 补齐这类目录，并检查 UUID 与原元数据一致；不会补齐缺失的普通资产。`funplay-cocos-mcp.config.json` 不应提交或复制，副本使用自己的编辑器端口；脚本连接校验只读取项目身份，无需先打开场景。
+
 ## 3. 清理示例，得到空框架
 
 示例边界是 `showcase`、`workshop`、`lobby`、`profile`、`common` 五个模块及其 XLSX 源表，以及启动入口中的首屏调用。它们各自的职责见 [示例应用说明](example-app.md)。建议在新副本执行以下步骤。
