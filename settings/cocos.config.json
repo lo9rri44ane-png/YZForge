@@ -17,6 +17,7 @@
                             "configMode": "overwrite",
                             "overwriteSettings": {
                                 "alipay-mini-game": {
+<<<<<<< HEAD
                                     "compressionType": "subpackage",
                                     "isRemote": false
                                 },
@@ -31,11 +32,24 @@
                                 "huawei-quick-game": {
                                     "compressionType": "subpackage",
                                     "isRemote": false
+=======
+                                    "compressionType": "subpackage"
+                                },
+                                "bytedance-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "honor-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "huawei-quick-game": {
+                                    "compressionType": "subpackage"
+>>>>>>> 9abdd3fd795caf3ea2c862d444bdefea8615b186
                                 },
                                 "migu-mini-game": {
                                     "compressionType": "subpackage"
                                 },
                                 "oppo-mini-game": {
+<<<<<<< HEAD
                                     "compressionType": "subpackage",
                                     "isRemote": false
                                 },
@@ -50,6 +64,18 @@
                                 "wechatgame": {
                                     "compressionType": "subpackage",
                                     "isRemote": false
+=======
+                                    "compressionType": "subpackage"
+                                },
+                                "taobao-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "vivo-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "wechatgame": {
+                                    "compressionType": "subpackage"
+>>>>>>> 9abdd3fd795caf3ea2c862d444bdefea8615b186
                                 },
                                 "xiaomi-quick-game": {
                                     "compressionType": "subpackage"
@@ -95,6 +121,7 @@
                             "configMode": "overwrite",
                             "overwriteSettings": {
                                 "alipay-mini-game": {
+<<<<<<< HEAD
                                     "compressionType": "subpackage",
                                     "isRemote": false
                                 },
@@ -109,11 +136,24 @@
                                 "huawei-quick-game": {
                                     "compressionType": "subpackage",
                                     "isRemote": false
+=======
+                                    "compressionType": "subpackage"
+                                },
+                                "bytedance-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "honor-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "huawei-quick-game": {
+                                    "compressionType": "subpackage"
+>>>>>>> 9abdd3fd795caf3ea2c862d444bdefea8615b186
                                 },
                                 "migu-mini-game": {
                                     "compressionType": "subpackage"
                                 },
                                 "oppo-mini-game": {
+<<<<<<< HEAD
                                     "compressionType": "subpackage",
                                     "isRemote": false
                                 },
@@ -128,6 +168,18 @@
                                 "wechatgame": {
                                     "compressionType": "subpackage",
                                     "isRemote": false
+=======
+                                    "compressionType": "subpackage"
+                                },
+                                "taobao-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "vivo-mini-game": {
+                                    "compressionType": "subpackage"
+                                },
+                                "wechatgame": {
+                                    "compressionType": "subpackage"
+>>>>>>> 9abdd3fd795caf3ea2c862d444bdefea8615b186
                                 },
                                 "xiaomi-quick-game": {
                                     "compressionType": "subpackage"
@@ -178,6 +230,7 @@
                     "graphics",
                     "intersection-2d",
                     "mask",
+<<<<<<< HEAD
                     "profiler",
                     "spine-3.8",
                     "tiled-map",
@@ -190,13 +243,30 @@
                     "LOAD_BOX2D_MANUALLY": false,
                     "LOAD_SPINE_MANUALLY": false
                 },
+=======
+                    "particle-2d",
+                    "physics-2d-box2d",
+                    "profiler",
+                    "rich-text",
+                    "spine-3.8",
+                    "tiled-map",
+                    "tween",
+                    "ui",
+                    "video",
+                    "webview"
+                ],
+>>>>>>> 9abdd3fd795caf3ea2c862d444bdefea8615b186
                 "noDeprecatedFeatures": {
                     "value": false,
                     "version": ""
                 },
+<<<<<<< HEAD
                 "optionMemory": {
                     "spine": "spine-3.8"
                 }
+=======
+                "flags": {}
+>>>>>>> 9abdd3fd795caf3ea2c862d444bdefea8615b186
             }
         },
         "globalConfigKey": "defaultConfig",
